@@ -24,10 +24,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from 'sonner'
 import {
   type AdminUser, adminApi, formatINR, formatDate, formatTimeAgo,
-  StatCard, LoadingSkeleton, EmptyState, SimplePagination, getAllMockUsers
+  StatCard, LoadingSkeleton, EmptyState, SimplePagination, getAllMockUsers,
+  AdminErrorBoundary
 } from '@/components/admin/shared'
 
-function UsersPage({ subscriptionFilter }: { subscriptionFilter?: 'FREE' | 'PREMIUM' }) {
+function UsersPageInner({ subscriptionFilter }: { subscriptionFilter?: 'FREE' | 'PREMIUM' }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<string>(subscriptionFilter === 'PREMIUM' ? 'Premium' : subscriptionFilter === 'FREE' ? 'Free' : 'All')
   const [page, setPage] = useState(1)
@@ -43,24 +44,49 @@ function UsersPage({ subscriptionFilter }: { subscriptionFilter?: 'FREE' | 'PREM
     setLoading(true)
     try {
       const subParam = subscriptionFilter || (filter === 'Premium' ? 'PREMIUM' : filter === 'Free' ? 'FREE' : '')
-      const statusParam = filter === 'Active' ? 'true' : filter === 'Blocked' ? 'false' : ''
-      const res = await adminApi(`/users?page=${page}&limit=${limit}&search=${search}&subscription=${subParam}&status=${statusParam}`)
+      const statusParam = filter === 'Active' ? 'active' : filter === 'Blocked' ? 'inactive' : ''
+      const res = await adminApi(`/users?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}&subscription=${subParam}&status=${statusParam}`)
       const data = await res.json()
-      setUsers(data.users || [])
-      setTotal(data.total || 0)
-    } catch {
+      // API returns { users, pagination: { total } } - handle both formats
+      const usersList = data.users || []
+      const totalCount = data.pagination?.total || data.total || 0
+      // Map DB fields to AdminUser format
+      const mapped = usersList.map((u: any) => ({
+        id: u.id,
+        name: u.name || 'Unknown',
+        email: u.email || '',
+        phone: u.phone,
+        isActive: u.isActive ?? true,
+        subscription: u.subscription || 'FREE',
+        virtualBalance: u.virtualBalance ?? 0,
+        createdAt: u.createdAt || new Date().toISOString(),
+        lastActive: u.lastLoginAt || u.lastActive || '',
+        totalTrades: u.totalTrades ?? 0,
+        totalPnl: u.totalPnl ?? 0,
+        winRate: u.winRate ?? 0,
+      }))
+      setUsers(mapped)
+      setTotal(totalCount)
+    } catch (err) {
+      console.warn('[UsersPage] API fetch failed, using mock data:', err)
       // Fallback to mock
-      const allMockUsers = getAllMockUsers()
-      let filtered = allMockUsers
-      if (search) filtered = filtered.filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
-      if (subscriptionFilter === 'PREMIUM') filtered = filtered.filter(u => u.subscription === 'PREMIUM')
-      if (subscriptionFilter === 'FREE') filtered = filtered.filter(u => u.subscription === 'FREE')
-      if (filter === 'Premium') filtered = filtered.filter(u => u.subscription === 'PREMIUM')
-      if (filter === 'Free') filtered = filtered.filter(u => u.subscription === 'FREE')
-      if (filter === 'Active') filtered = filtered.filter(u => u.isActive)
-      if (filter === 'Blocked') filtered = filtered.filter(u => !u.isActive)
-      setUsers(filtered.slice((page - 1) * limit, page * limit))
-      setTotal(filtered.length)
+      try {
+        const allMockUsers = getAllMockUsers()
+        let filtered = allMockUsers
+        if (search) filtered = filtered.filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
+        if (subscriptionFilter === 'PREMIUM') filtered = filtered.filter(u => u.subscription === 'PREMIUM')
+        if (subscriptionFilter === 'FREE') filtered = filtered.filter(u => u.subscription === 'FREE')
+        if (filter === 'Premium') filtered = filtered.filter(u => u.subscription === 'PREMIUM')
+        if (filter === 'Free') filtered = filtered.filter(u => u.subscription === 'FREE')
+        if (filter === 'Active') filtered = filtered.filter(u => u.isActive)
+        if (filter === 'Blocked') filtered = filtered.filter(u => !u.isActive)
+        setUsers(filtered.slice((page - 1) * limit, page * limit))
+        setTotal(filtered.length)
+      } catch (mockErr) {
+        console.error('[UsersPage] Mock data fallback also failed:', mockErr)
+        setUsers([])
+        setTotal(0)
+      }
     } finally {
       setLoading(false)
     }
@@ -411,6 +437,14 @@ function UsersPage({ subscriptionFilter }: { subscriptionFilter?: 'FREE' | 'PREM
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+function UsersPage({ subscriptionFilter }: { subscriptionFilter?: 'FREE' | 'PREMIUM' }) {
+  return (
+    <AdminErrorBoundary fallback="Failed to load users">
+      <UsersPageInner subscriptionFilter={subscriptionFilter} />
+    </AdminErrorBoundary>
   )
 }
 

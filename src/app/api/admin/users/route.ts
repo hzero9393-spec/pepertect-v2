@@ -34,9 +34,9 @@ export async function GET(request: NextRequest) {
       where.subscription = subscription
     }
 
-    if (status === 'active') {
+    if (status === 'true' || status === 'active') {
       where.isActive = true
-    } else if (status === 'inactive') {
+    } else if (status === 'false' || status === 'inactive') {
       where.isActive = false
     }
 
@@ -76,6 +76,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       users,
+      total,
       pagination: {
         page,
         limit,

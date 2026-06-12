@@ -18,6 +18,7 @@ import {
   AlertDialogAction, AlertDialogTrigger
 } from '@/components/ui/alert-dialog'
 import dynamic from 'next/dynamic'
+import { AdminErrorBoundary } from './shared'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type PageKey = 'dashboard' | 'users' | 'paid-users' | 'free-users' | 'trades' | 'positions' | 'analytics' | 'reports' | 'profile' | 'settings'
@@ -191,17 +192,17 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
     }
 
     switch (currentPage) {
-      case 'dashboard': return <DashboardPage />
-      case 'users': return <UsersPage />
-      case 'paid-users': return <UsersPage subscriptionFilter="PREMIUM" />
-      case 'free-users': return <UsersPage subscriptionFilter="FREE" />
-      case 'trades': return <TradesPage />
-      case 'positions': return <PositionsPage />
-      case 'analytics': return <AnalyticsPage />
-      case 'reports': return <ReportsPage />
-      case 'profile': return <ProfilePage />
-      case 'settings': return <SettingsPage />
-      default: return <DashboardPage />
+      case 'dashboard': return <AdminErrorBoundary fallback="Failed to load dashboard"><DashboardPage /></AdminErrorBoundary>
+      case 'users': return <AdminErrorBoundary fallback="Failed to load users"><UsersPage /></AdminErrorBoundary>
+      case 'paid-users': return <AdminErrorBoundary fallback="Failed to load paid users"><UsersPage subscriptionFilter="PREMIUM" /></AdminErrorBoundary>
+      case 'free-users': return <AdminErrorBoundary fallback="Failed to load free users"><UsersPage subscriptionFilter="FREE" /></AdminErrorBoundary>
+      case 'trades': return <AdminErrorBoundary fallback="Failed to load trades"><TradesPage /></AdminErrorBoundary>
+      case 'positions': return <AdminErrorBoundary fallback="Failed to load positions"><PositionsPage /></AdminErrorBoundary>
+      case 'analytics': return <AdminErrorBoundary fallback="Failed to load analytics"><AnalyticsPage /></AdminErrorBoundary>
+      case 'reports': return <AdminErrorBoundary fallback="Failed to load reports"><ReportsPage /></AdminErrorBoundary>
+      case 'profile': return <AdminErrorBoundary fallback="Failed to load profile"><ProfilePage /></AdminErrorBoundary>
+      case 'settings': return <AdminErrorBoundary fallback="Failed to load settings"><SettingsPage /></AdminErrorBoundary>
+      default: return <AdminErrorBoundary fallback="Failed to load dashboard"><DashboardPage /></AdminErrorBoundary>
     }
   }
 

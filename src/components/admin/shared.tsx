@@ -1,6 +1,7 @@
 import React from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { AlertTriangle } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type PageKey = 'dashboard' | 'users' | 'paid-users' | 'free-users' | 'trades' | 'positions' | 'analytics' | 'reports' | 'profile' | 'settings'
@@ -81,9 +82,18 @@ export async function adminApi(endpoint: string, options?: RequestInit) {
   })
   if (res.status === 401) {
     localStorage.removeItem('admin_token')
-    throw new Error('Unauthorized')
+    throw new Error('Unauthorized - please login again')
   }
-  if (!res.ok) throw new Error('API Error')
+  if (!res.ok) {
+    let errorMsg = 'API Error'
+    try {
+      const errData = await res.json()
+      errorMsg = errData.error || errData.message || `API Error (${res.status})`
+    } catch {
+      errorMsg = `API Error (${res.status})`
+    }
+    throw new Error(errorMsg)
+  }
   return res
 }
 
@@ -272,6 +282,50 @@ export function getAllMockTrades(): Trade[] {
 export function getAllMockPositions(): Position[] {
   ensureMockData()
   return _allMockPositions!
+}
+
+// ─── Error Boundary ──────────────────────────────────────────────────────────
+export class AdminErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback?: string },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode; fallback?: string }) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[AdminErrorBoundary]', error, info)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="flex size-16 items-center justify-center rounded-2xl bg-red-50 mb-4">
+            <AlertTriangle className="size-7 text-red-400" />
+          </div>
+          <h3 className="text-sm font-semibold text-[#1a1a1a]">
+            {this.props.fallback || 'Something went wrong'}
+          </h3>
+          <p className="text-xs text-[#6b7280] mt-1 max-w-xs">
+            {this.state.error?.message || 'An unexpected error occurred while loading this section.'}
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="mt-4 px-4 py-2 text-xs font-medium rounded-lg bg-[#00D09C] text-white hover:bg-[#00b888] transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 // ─── Stat Card Component ─────────────────────────────────────────────────────
