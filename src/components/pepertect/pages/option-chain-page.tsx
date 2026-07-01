@@ -41,6 +41,7 @@ interface OCUpdate {
 }
 
 type Underlying = 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY' | 'SENSEX'
+type ViewMode = 'LTP' | 'OI'
 
 const INDICES: { key: Underlying; label: string; lotSize: number }[] = [
   { key: 'NIFTY', label: 'NIFTY 50', lotSize: 65 },
@@ -53,12 +54,12 @@ const INDICES: { key: Underlying; label: string; lotSize: number }[] = [
 
 function fmtExpiry(d: string) {
   const dt = new Date(d + 'T00:00:00+05:30')
-  return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
+  return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
 }
 
 function fmtNum(n: number): string {
-  if (n >= 10000000) return (n / 10000000).toFixed(2) + ' Cr'
-  if (n >= 100000) return (n / 100000).toFixed(2) + ' L'
+  if (n >= 10000000) return (n / 10000000).toFixed(2) + 'Cr'
+  if (n >= 100000) return (n / 100000).toFixed(2) + 'L'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
   return String(n)
 }
@@ -67,6 +68,11 @@ function fmtLtp(n: number): string {
   if (n <= 0) return '-'
   if (n < 10) return n.toFixed(2)
   return n.toFixed(1)
+}
+
+function fmtPct(n: number): string {
+  if (!isFinite(n) || n === 0) return '-'
+  return (n > 0 ? '+' : '') + n.toFixed(1) + '%'
 }
 
 // ─── Trade Panel State ─────────────────────────────────────────────────────
@@ -88,6 +94,26 @@ const defaultTrade: TradeState = {
   lots: 1, orderType: 'MARKET', productType: 'INTRADAY', limitPrice: '',
 }
 
+// ─── Color Tokens ───────────────────────────────────────────────────────────
+
+const C = {
+  bg: '#F7F8FA',
+  surface: '#FFFFFF',
+  text: '#1a1a1a',
+  textDim: '#6b7280',
+  textMuted: '#9ca3af',
+  border: '#E5E7EB',
+  borderLight: '#F0F0F0',
+  green: '#00B386',
+  greenBg: 'rgba(0,179,134,0.06)',
+  red: '#EB5B3C',
+  redBg: 'rgba(235,91,60,0.06)',
+  atmBg: '#EEF0F4',
+  atmBorder: '#D5D9E2',
+  primary: '#00D09C',
+  headerBg: '#F4F5F7',
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function OptionChainPage() {
@@ -97,8 +123,9 @@ export function OptionChainPage() {
   const [data, setData] = useState<OCUpdate | null>(null)
   const [live, setLive] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [viewMode, setViewMode] = useState<ViewMode>('LTP')
   const esRef = useRef<EventSource | null>(null)
-  const tableRef = useRef<HTMLDivElement>(null)
+  const tableBodyRef = useRef<HTMLDivElement>(null)
   const scrolledOnce = useRef(false)
 
   // Trade state
@@ -159,14 +186,14 @@ export function OptionChainPage() {
 
   // Auto-scroll to ATM once
   useEffect(() => {
-    if (data && tableRef.current && !scrolledOnce.current) {
-      const el = tableRef.current.querySelector('[data-atm="true"]')
+    if (data && tableBodyRef.current && !scrolledOnce.current) {
+      const el = tableBodyRef.current.querySelector('[data-atm="true"]')
       if (el) { el.scrollIntoView({ block: 'center' }); scrolledOnce.current = true }
     }
   }, [data?.strikes?.length])
   useEffect(() => { scrolledOnce.current = false }, [index, expiry])
 
-  // Filter strikes
+  // Filter strikes around spot
   const strikes = useMemo(() => {
     if (!data?.strikes?.length) return []
     return data.strikes.filter(s => Math.abs(s.strike_price - data.spot) <= 2000)
@@ -183,6 +210,14 @@ export function OptionChainPage() {
     }
     return best
   }, [data?.strikes, data?.spot])
+
+  // Spot change
+  const spotChange = useMemo(() => {
+    if (!data) return null
+    const first = strikes[0]
+    if (!first) return null
+    return data.spot - first.call_options.market_data.close_price
+  }, [data, strikes])
 
   // ── Trade Logic ──
 
@@ -217,7 +252,7 @@ export function OptionChainPage() {
       price: fillPrice,
       totalValue: Math.round(totalValue * 100) / 100,
       brokerage: Math.round(brokerage * 100) / 100,
-      availableBalance: 0, // will be checked server-side
+      availableBalance: 0,
       optionType: trade.optionType,
       strikePrice: trade.strike,
       lots: trade.lots,
@@ -244,7 +279,7 @@ export function OptionChainPage() {
       lots: trade.lots,
       lotSize,
       expiryDate: expiry,
-      ltp: trade.ltp, // Pass LTP for live option chain trades
+      ltp: trade.ltp,
     }
 
     if (trade.orderType === 'LIMIT' && trade.limitPrice) {
@@ -258,115 +293,211 @@ export function OptionChainPage() {
         body: JSON.stringify(body),
       })
 
-      const data = await res.json()
+      const resData = await res.json()
 
-      if (res.ok && data.success) {
+      if (res.ok && resData.success) {
         showTradeSuccess({
           symbol: `${index} ${trade.strike} ${trade.optionType}`,
           type: trade.side,
           qty: totalQty,
           price: fillPrice,
           time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase(),
-          orderId: data.order?.id?.slice(-8).toUpperCase() || 'N/A',
+          orderId: resData.order?.id?.slice(-8).toUpperCase() || 'N/A',
           segment: 'OPTIONS',
           optionType: trade.optionType,
           strikePrice: trade.strike,
-          totalValue: data.order?.totalValue,
-          brokerage: data.order?.brokerage,
+          totalValue: resData.order?.totalValue,
+          brokerage: resData.order?.brokerage,
         })
         setTrade(defaultTrade)
-        return { success: true, orderId: data.order?.id?.slice(-8).toUpperCase(), balance: data.balance, totalValue: data.order?.totalValue, brokerage: data.order?.brokerage }
+        return { success: true, orderId: resData.order?.id?.slice(-8).toUpperCase(), balance: resData.balance, totalValue: resData.order?.totalValue, brokerage: resData.order?.brokerage }
       } else {
-        return { success: false, error: data.error || 'Trade failed' }
+        return { success: false, error: resData.error || 'Trade failed' }
       }
     } catch {
       return { success: false, error: 'Network error' }
     }
   }, [token, trade, fillPrice, totalQty, lotSize, index, expiry, showTradeSuccess])
 
+  // ─── Column config per mode ───
+
+  const isLTP = viewMode === 'LTP'
+
   return (
-    <div className="min-h-screen bg-[#f8f9fa] flex flex-col">
-      {/* ── Top Bar ── */}
-      <div className="sticky top-14 z-20 bg-white border-b border-[#e0e0e0]">
-        <div className="max-w-7xl mx-auto px-3 py-2.5">
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar mb-2">
-            {INDICES.map(ind => (
-              <button
-                key={ind.key}
-                onClick={() => setIndex(ind.key)}
-                className={cn(
-                  'px-4 py-1.5 rounded text-sm font-semibold transition-colors whitespace-nowrap',
-                  index === ind.key ? 'bg-[#0d6efd] text-white' : 'text-[#555] hover:bg-[#eee]'
-                )}
-              >
-                {ind.label}
-              </button>
-            ))}
-            <div className="ml-auto flex items-center gap-2 shrink-0">
-              {live && (
-                <span className="flex items-center gap-1 text-[11px] text-[#0d6efd] font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#0d6efd] animate-pulse" />
-                  LIVE
-                </span>
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 92px)', background: C.bg }}>
+
+      {/* ═══ INDEX TABS ═══ */}
+      <div className="shrink-0 border-b" style={{ borderColor: C.border, background: C.surface }}>
+        <div className="flex items-center px-1">
+          {INDICES.map(ind => (
+            <button
+              key={ind.key}
+              onClick={() => setIndex(ind.key)}
+              className="relative px-4 py-2.5 text-[12px] font-semibold tracking-wide transition-colors whitespace-nowrap"
+              style={{
+                color: index === ind.key ? C.text : C.textDim,
+              }}
+            >
+              {ind.label}
+              {index === ind.key && (
+                <span className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full" style={{ background: C.primary }} />
               )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-              {expiries.map(e => (
-                <button
-                  key={e}
-                  onClick={() => setExpiry(e)}
-                  className={cn(
-                    'px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap',
-                    expiry === e ? 'bg-[#0d6efd] text-white' : 'text-[#666] hover:bg-[#eee]'
-                  )}
-                >
-                  {fmtExpiry(e)}
-                </button>
-              ))}
-            </div>
-
-            {data && (
-              <div className="ml-auto flex items-center gap-4 text-xs shrink-0">
-                <span><span className="text-[#888]">Spot: </span><span className="font-bold text-[#111]">{data.spot.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></span>
-                <span><span className="text-[#888]">PCR: </span><span className={cn('font-bold', data.pcr > 1 ? 'text-green-600' : 'text-red-500')}>{data.pcr > 0 ? data.pcr.toFixed(2) : '-'}</span></span>
-                <span><span className="text-[#888]">Max Pain: </span><span className="font-bold text-[#111]">{data.maxPainStrike > 0 ? data.maxPainStrike.toLocaleString('en-IN') : '-'}</span></span>
-                <span className="hidden sm:inline"><span className="text-[#888]">CE OI: </span><span className="font-bold text-green-600">{fmtNum(data.totalCallOI)}</span></span>
-                <span className="hidden sm:inline"><span className="text-[#888]">PE OI: </span><span className="font-bold text-red-500">{fmtNum(data.totalPutOI)}</span></span>
-              </div>
+            </button>
+          ))}
+          <div className="ml-auto pr-3 flex items-center gap-1.5">
+            {live && (
+              <span className="flex items-center gap-1 text-[10px] font-medium" style={{ color: C.primary }}>
+                <span className="w-1.5 h-1.5 rounded-full animate-live-pulse" style={{ background: C.primary }} />
+                LIVE
+              </span>
             )}
           </div>
         </div>
       </div>
 
-      {/* ── Table ── */}
-      <div className="flex-1 px-2 sm:px-4 py-3 pb-4" ref={tableRef}>
+      {/* ═══ MARKET DATA STRIP (Bloomberg-style compressed) ═══ */}
+      {data && (
+        <div className="shrink-0 px-3 py-1.5 flex items-center gap-4 overflow-x-auto no-scrollbar text-[11px] border-b" style={{ background: C.surface, borderColor: C.border }}>
+          <span className="font-semibold" style={{ color: C.text }}>
+            {data.spot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+          {spotChange !== null && spotChange !== 0 && (
+            <span className="font-medium" style={{ color: spotChange > 0 ? C.green : C.red }}>
+              {spotChange > 0 ? '+' : ''}{spotChange.toFixed(2)} ({((spotChange / (data.spot - spotChange)) * 100).toFixed(2)}%)
+            </span>
+          )}
+          <span style={{ color: C.textMuted }}>PCR</span>
+          <span className="font-semibold" style={{ color: data.pcr > 1 ? C.green : data.pcr < 0.8 ? C.red : C.text }}>
+            {data.pcr > 0 ? data.pcr.toFixed(2) : '-'}
+          </span>
+          <span style={{ color: C.textMuted }}>MaxPain</span>
+          <span className="font-semibold" style={{ color: C.text }}>
+            {data.maxPainStrike > 0 ? data.maxPainStrike.toLocaleString('en-IN') : '-'}
+          </span>
+          <span style={{ color: C.textMuted }}>CE OI</span>
+          <span className="font-semibold" style={{ color: C.green }}>{fmtNum(data.totalCallOI)}</span>
+          <span style={{ color: C.textMuted }}>PE OI</span>
+          <span className="font-semibold" style={{ color: C.red }}>{fmtNum(data.totalPutOI)}</span>
+          <span style={{ color: C.textMuted }}>Lot</span>
+          <span className="font-semibold" style={{ color: C.text }}>{lotSize}</span>
+        </div>
+      )}
+
+      {/* ═══ EXPIRY BAR ═══ */}
+      <div className="shrink-0 border-b flex items-center" style={{ borderColor: C.border, background: C.surface }}>
+        <div className="flex items-center overflow-x-auto no-scrollbar px-1 py-0">
+          {expiries.map(e => (
+            <button
+              key={e}
+              onClick={() => setExpiry(e)}
+              className="relative px-3.5 py-2 text-[11px] font-medium whitespace-nowrap transition-colors"
+              style={{ color: expiry === e ? C.text : C.textDim }}
+            >
+              {fmtExpiry(e)}
+              {expiry === e && (
+                <span className="absolute bottom-0 left-1.5 right-1.5 h-[2px] rounded-full" style={{ background: C.primary }} />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* LTP / OI Toggle */}
+        <div className="ml-auto pr-2 shrink-0">
+          <div className="inline-flex rounded-md overflow-hidden border" style={{ borderColor: C.border }}>
+            {(['LTP', 'OI'] as ViewMode[]).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className="px-3 py-1 text-[10px] font-bold tracking-wider transition-colors"
+                style={{
+                  background: viewMode === mode ? C.text : 'transparent',
+                  color: viewMode === mode ? C.surface : C.textDim,
+                }}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ═══ OPTION CHAIN TABLE (80% screen) ═══ */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-1 pt-1 pb-1">
+
         {loading ? (
-          <div className="flex items-center justify-center py-20 text-sm text-[#888]">Loading option chain...</div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex items-center gap-2 text-[12px]" style={{ color: C.textMuted }}>
+              <span className="w-3 h-3 border-2 rounded-full animate-spin" style={{ borderColor: C.border, borderTopColor: C.primary }} />
+              Loading chain...
+            </div>
+          </div>
         ) : strikes.length > 0 ? (
-          <div className="bg-white border border-[#ddd] rounded overflow-hidden">
-            {/* Header */}
-            <div className="grid grid-cols-[1fr_72px_1fr] text-[11px] font-semibold uppercase tracking-wide border-b-2 border-[#ddd] bg-[#f5f5f5]">
-              <div className="grid grid-cols-5 text-center text-[#666] border-r border-[#ddd]">
-                <span>OI Chg</span><span>OI</span><span>Volume</span><span>IV</span><span>LTP</span>
-              </div>
-              <div className="flex items-center justify-center text-[#333] font-bold text-xs">STRIKE</div>
-              <div className="grid grid-cols-5 text-center text-[#666]">
-                <span>LTP</span><span>IV</span><span>Volume</span><span>OI</span><span>OI Chg</span>
+          <div className="flex-1 min-h-0 flex flex-col rounded-sm overflow-hidden border" style={{ borderColor: C.border, background: C.surface }}>
+
+            {/* ── Sticky Table Header ── */}
+            <div className="shrink-0 sticky top-0 z-10" style={{ background: C.headerBg, borderBottom: `2px solid ${C.border}` }}>
+              {isLTP ? (
+                /* LTP Mode Header */
+                <div className="grid text-[9px] font-bold uppercase tracking-wider" style={{
+                  gridTemplateColumns: '1fr 60px 1fr',
+                  color: C.textDim,
+                }}>
+                  <div className="grid grid-cols-5 text-right pr-1 border-r" style={{ borderColor: C.border }}>
+                    <span className="px-0.5">OI Chg</span>
+                    <span className="px-0.5">OI</span>
+                    <span className="px-0.5">Vol</span>
+                    <span className="px-0.5">IV</span>
+                    <span className="px-0.5 text-center">LTP</span>
+                  </div>
+                  <div className="flex items-center justify-center" style={{ color: C.text }}>
+                    <span className="text-[9px]">STRIKE</span>
+                  </div>
+                  <div className="grid grid-cols-5 text-left pl-1">
+                    <span className="px-0.5 text-center">LTP</span>
+                    <span className="px-0.5">IV</span>
+                    <span className="px-0.5">Vol</span>
+                    <span className="px-0.5">OI</span>
+                    <span className="px-0.5 text-right pr-1">OI Chg</span>
+                  </div>
+                </div>
+              ) : (
+                /* OI Mode Header */
+                <div className="grid text-[9px] font-bold uppercase tracking-wider" style={{
+                  gridTemplateColumns: '1fr 60px 1fr',
+                  color: C.textDim,
+                }}>
+                  <div className="grid grid-cols-3 text-right pr-1 border-r" style={{ borderColor: C.border }}>
+                    <span className="px-0.5">OI</span>
+                    <span className="px-0.5">OI Chg</span>
+                    <span className="px-0.5 text-right pr-1">Chg %</span>
+                  </div>
+                  <div className="flex items-center justify-center" style={{ color: C.text }}>
+                    <span className="text-[9px]">STRIKE</span>
+                  </div>
+                  <div className="grid grid-cols-3 text-left pl-1">
+                    <span className="px-0.5 text-left pl-1">Chg %</span>
+                    <span className="px-0.5">OI Chg</span>
+                    <span className="px-0.5">OI</span>
+                  </div>
+                </div>
+              )}
+
+              {/* CE / PE labels */}
+              <div className="grid" style={{
+                gridTemplateColumns: '1fr 60px 1fr',
+              }}>
+                <div className="text-center text-[9px] font-bold py-0.5 border-r" style={{ color: C.green, background: C.greenBg, borderColor: C.border }}>
+                  CALLS
+                </div>
+                <div />
+                <div className="text-center text-[9px] font-bold py-0.5" style={{ color: C.red, background: C.redBg }}>
+                  PUTS
+                </div>
               </div>
             </div>
 
-            {/* CE/PE labels */}
-            <div className="grid grid-cols-[1fr_72px_1fr] text-[10px] font-bold border-b border-[#eee]">
-              <div className="text-center text-green-700 py-1 border-r border-[#ddd] bg-[#e8f5e9]">CALLS (CE)</div>
-              <div />
-              <div className="text-center text-red-700 py-1 bg-[#fce4ec]">PUTS (PE)</div>
-            </div>
-
-            {/* Rows */}
-            <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
+            {/* ── Scrollable Body ── */}
+            <div ref={tableBodyRef} className="flex-1 overflow-y-auto custom-scrollbar">
               {strikes.map(s => {
                 const ce = s.call_options.market_data
                 const pe = s.put_options.market_data
@@ -377,84 +508,185 @@ export function OptionChainPage() {
                 const peITM = s.strike_price > data!.spot
                 const ceOIChg = ce.oi - (ce.prev_oi || 0)
                 const peOIChg = pe.oi - (pe.prev_oi || 0)
+                const ceChgPct = ce.prev_oi > 0 ? (ceOIChg / ce.prev_oi) * 100 : 0
+                const peChgPct = pe.prev_oi > 0 ? (peOIChg / pe.prev_oi) * 100 : 0
 
                 return (
                   <div
                     key={s.strike_price}
                     data-atm={isATM ? 'true' : undefined}
-                    className={cn(
-                      'grid grid-cols-[1fr_72px_1fr] text-[11px] font-mono border-b border-[#f0f0f0] hover:bg-[#f0f7ff]',
-                      isATM && 'bg-[#e3f2fd] border-y border-[#90caf9]'
-                    )}
+                    className="grid items-center transition-colors duration-100"
+                    style={{
+                      gridTemplateColumns: '1fr 60px 1fr',
+                      height: '36px',
+                      borderBottom: `1px solid ${isATM ? C.atmBorder : C.borderLight}`,
+                      background: isATM ? C.atmBg : 'transparent',
+                    }}
+                    onMouseEnter={e => { if (!isATM) e.currentTarget.style.background = '#F0F4FF' }}
+                    onMouseLeave={e => { if (!isATM) e.currentTarget.style.background = 'transparent' }}
                   >
-                    {/* CE Side */}
-                    <div className={cn(
-                      'grid grid-cols-5 items-center border-r border-[#ddd]',
-                      ceITM && !isATM && 'bg-[#f1f8e9]'
-                    )}>
-                      <Cell val={ceOIChg} fmt="oiChg" />
-                      <Cell val={ce.oi} fmt="num" />
-                      <Cell val={ce.volume} fmt="num" />
-                      <span className="text-center text-[#777]">{ceIV > 0 ? ceIV.toFixed(1) : '-'}</span>
-                      {/* CE LTP — clickable */}
-                      <button
-                        className="text-center font-semibold text-[#111] hover:text-[#0d6efd] hover:underline cursor-pointer"
-                        onClick={() => openTrade('CE', s.strike_price, ce.ltp, 'BUY')}
+                    {/* ── CE Side ── */}
+                    {isLTP ? (
+                      <div
+                        className="grid grid-cols-5 items-center text-right pr-1 border-r text-[11px] font-mono"
+                        style={{
+                          borderColor: C.border,
+                          background: ceITM && !isATM ? C.greenBg : 'transparent',
+                        }}
                       >
-                        {fmtLtp(ce.ltp)}
-                      </button>
-                    </div>
+                        <span className="px-0.5" style={{ color: ceOIChg > 0 ? C.green : ceOIChg < 0 ? C.red : C.textMuted }}>
+                          {ceOIChg !== 0 ? (ceOIChg > 0 ? '+' : '') + fmtNum(Math.abs(ceOIChg)) : '-'}
+                        </span>
+                        <span className="px-0.5" style={{ color: C.text }}>{ce.oi > 0 ? fmtNum(ce.oi) : '-'}</span>
+                        <span className="px-0.5" style={{ color: C.textDim }}>{ce.volume > 0 ? fmtNum(ce.volume) : '-'}</span>
+                        <span className="px-0.5" style={{ color: C.textDim }}>{ceIV > 0 ? ceIV.toFixed(1) : '-'}</span>
+                        <button
+                          className="px-0.5 text-center font-semibold cursor-pointer hover:opacity-70 transition-opacity"
+                          style={{ color: C.text }}
+                          onClick={() => openTrade('CE', s.strike_price, ce.ltp, 'BUY')}
+                        >
+                          {fmtLtp(ce.ltp)}
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        className="grid grid-cols-3 items-center text-right pr-1 border-r text-[11px] font-mono"
+                        style={{
+                          borderColor: C.border,
+                          background: ceITM && !isATM ? C.greenBg : 'transparent',
+                        }}
+                      >
+                        <span className="px-0.5" style={{ color: C.text }}>{ce.oi > 0 ? fmtNum(ce.oi) : '-'}</span>
+                        <span className="px-0.5" style={{ color: ceOIChg > 0 ? C.green : ceOIChg < 0 ? C.red : C.textMuted }}>
+                          {ceOIChg !== 0 ? (ceOIChg > 0 ? '+' : '') + fmtNum(Math.abs(ceOIChg)) : '-'}
+                        </span>
+                        <span className="px-0.5 pr-1" style={{ color: ceChgPct > 0 ? C.green : ceChgPct < 0 ? C.red : C.textMuted }}>
+                          {fmtPct(ceChgPct)}
+                        </span>
+                      </div>
+                    )}
 
-                    {/* Strike */}
-                    <div className={cn(
-                      'flex items-center justify-center font-bold text-xs py-1.5 border-r border-[#ddd]',
-                      isATM ? 'text-[#1565c0] bg-[#e3f2fd]' : 'text-[#222]'
-                    )}>
+                    {/* ── Strike ── */}
+                    <div
+                      className="flex items-center justify-center text-[11px] font-bold font-mono border-r cursor-pointer hover:opacity-70"
+                      style={{
+                        borderColor: C.border,
+                        color: isATM ? C.primary : C.text,
+                        background: isATM ? C.atmBg : 'transparent',
+                      }}
+                      onClick={() => {
+                        const ceLtp = ce.ltp
+                        const peLtp = pe.ltp
+                        // Open with the option that has more OI (more active)
+                        if (ce.oi >= pe.oi) openTrade('CE', s.strike_price, ceLtp, 'BUY')
+                        else openTrade('PE', s.strike_price, peLtp, 'BUY')
+                      }}
+                    >
                       {s.strike_price.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </div>
 
-                    {/* PE Side */}
-                    <div className={cn(
-                      'grid grid-cols-5 items-center',
-                      peITM && !isATM && 'bg-[#fce4ec]'
-                    )}>
-                      {/* PE LTP — clickable */}
-                      <button
-                        className="text-center font-semibold text-[#111] hover:text-[#d32f2f] hover:underline cursor-pointer"
-                        onClick={() => openTrade('PE', s.strike_price, pe.ltp, 'BUY')}
+                    {/* ── PE Side ── */}
+                    {isLTP ? (
+                      <div
+                        className="grid grid-cols-5 items-center text-left pl-1 text-[11px] font-mono"
+                        style={{
+                          background: peITM && !isATM ? C.redBg : 'transparent',
+                        }}
                       >
-                        {fmtLtp(pe.ltp)}
-                      </button>
-                      <span className="text-center text-[#777]">{peIV > 0 ? peIV.toFixed(1) : '-'}</span>
-                      <Cell val={pe.volume} fmt="num" />
-                      <Cell val={pe.oi} fmt="num" />
-                      <Cell val={peOIChg} fmt="oiChg" />
-                    </div>
+                        <button
+                          className="px-0.5 text-center font-semibold cursor-pointer hover:opacity-70 transition-opacity"
+                          style={{ color: C.text }}
+                          onClick={() => openTrade('PE', s.strike_price, pe.ltp, 'BUY')}
+                        >
+                          {fmtLtp(pe.ltp)}
+                        </button>
+                        <span className="px-0.5" style={{ color: C.textDim }}>{peIV > 0 ? peIV.toFixed(1) : '-'}</span>
+                        <span className="px-0.5" style={{ color: C.textDim }}>{pe.volume > 0 ? fmtNum(pe.volume) : '-'}</span>
+                        <span className="px-0.5" style={{ color: C.text }}>{pe.oi > 0 ? fmtNum(pe.oi) : '-'}</span>
+                        <span className="px-0.5 text-right pr-1" style={{ color: peOIChg > 0 ? C.green : peOIChg < 0 ? C.red : C.textMuted }}>
+                          {peOIChg !== 0 ? (peOIChg > 0 ? '+' : '') + fmtNum(Math.abs(peOIChg)) : '-'}
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        className="grid grid-cols-3 items-center text-left pl-1 text-[11px] font-mono"
+                        style={{
+                          background: peITM && !isATM ? C.redBg : 'transparent',
+                        }}
+                      >
+                        <span className="px-0.5 pl-1" style={{ color: peChgPct > 0 ? C.green : peChgPct < 0 ? C.red : C.textMuted }}>
+                          {fmtPct(peChgPct)}
+                        </span>
+                        <span className="px-0.5" style={{ color: peOIChg > 0 ? C.green : peOIChg < 0 ? C.red : C.textMuted }}>
+                          {peOIChg !== 0 ? (peOIChg > 0 ? '+' : '') + fmtNum(Math.abs(peOIChg)) : '-'}
+                        </span>
+                        <span className="px-0.5" style={{ color: C.text }}>{pe.oi > 0 ? fmtNum(pe.oi) : '-'}</span>
+                      </div>
+                    )}
                   </div>
                 )
               })}
+
+              {/* ── Total Row ── */}
+              <div
+                className="grid items-center shrink-0 text-[10px] font-bold"
+                style={{
+                  gridTemplateColumns: '1fr 60px 1fr',
+                  height: '28px',
+                  borderTop: `2px solid ${C.border}`,
+                  background: C.headerBg,
+                }}
+              >
+                {isLTP ? (
+                  <>
+                    <div className="grid grid-cols-5 items-center text-right pr-1 border-r" style={{ borderColor: C.border, color: C.textDim }}>
+                      <span />
+                      <span className="font-semibold" style={{ color: C.green }}>{fmtNum(data?.totalCallOI || 0)}</span>
+                      <span className="text-[9px]">CE OI</span>
+                      <span /><span />
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-3 items-center text-right pr-1 border-r" style={{ borderColor: C.border, color: C.textDim }}>
+                    <span className="font-semibold" style={{ color: C.green }}>{fmtNum(data?.totalCallOI || 0)}</span>
+                    <span /><span />
+                  </div>
+                )}
+                <div />
+                {isLTP ? (
+                  <div className="grid grid-cols-5 items-center text-left pl-1" style={{ color: C.textDim }}>
+                      <span /><span />
+                      <span className="text-[9px]">PE OI</span>
+                      <span className="font-semibold" style={{ color: C.red }}>{fmtNum(data?.totalPutOI || 0)}</span>
+                      <span />
+                    </div>
+                ) : (
+                  <div className="grid grid-cols-3 items-center text-left pl-1" style={{ color: C.textDim }}>
+                    <span /><span />
+                    <span className="font-semibold" style={{ color: C.red }}>{fmtNum(data?.totalPutOI || 0)}</span>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Total Row */}
-            <div className="grid grid-cols-[1fr_72px_1fr] text-[11px] font-bold border-t-2 border-[#ddd] bg-[#f5f5f5]">
-              <div className="grid grid-cols-5 items-center border-r border-[#ddd]">
-                <span />
-                <span className="text-center text-green-700">{fmtNum(data?.totalCallOI || 0)}</span>
-                <span className="text-center text-[#666]">Total CE OI</span>
-                <span /><span />
-              </div>
-              <div />
-              <div className="grid grid-cols-5 items-center">
-                <span /><span />
-                <span className="text-center text-[#666]">Total PE OI</span>
-                <span className="text-center text-red-600">{fmtNum(data?.totalPutOI || 0)}</span>
-                <span />
-              </div>
+            {/* ── Tiny Legend ── */}
+            <div className="shrink-0 flex items-center justify-center gap-4 py-1 border-t text-[9px]" style={{ borderColor: C.border, color: C.textMuted, background: C.headerBg }}>
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: C.green }} />
+                Calls (CE)
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: C.red }} />
+                Puts (PE)
+              </span>
+              <span>ATM highlighted</span>
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center py-20 text-sm text-[#888]">
-            {live ? 'No data for this expiry' : 'Connecting...'}
+          <div className="flex-1 flex items-center justify-center">
+            <span className="text-[12px]" style={{ color: C.textMuted }}>
+              {live ? 'No data for this expiry' : 'Connecting...'}
+            </span>
           </div>
         )}
       </div>
@@ -466,21 +698,21 @@ export function OptionChainPage() {
           <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl max-h-[85vh] overflow-y-auto">
             {/* Handle */}
             <div className="flex justify-center pt-2 pb-1">
-              <div className="w-10 h-1 rounded-full bg-[#ddd]" />
+              <div className="w-10 h-1 rounded-full" style={{ background: C.border }} />
             </div>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-4 pb-3 border-b border-[#eee]">
+            <div className="flex items-center justify-between px-4 pb-3 border-b" style={{ borderColor: C.border }}>
               <div>
-                <p className="text-sm font-bold text-[#111]">
+                <p className="text-sm font-bold" style={{ color: C.text }}>
                   {index} {trade.strike} {trade.optionType}
                 </p>
-                <p className="text-[11px] text-[#888]">
-                  Expiry: {fmtExpiry(expiry)} &middot; Lot Size: {lotSize} &middot; LTP: {'\u20B9'}{fmtLtp(trade.ltp)}
+                <p className="text-[11px]" style={{ color: C.textDim }}>
+                  {fmtExpiry(expiry)} &middot; Lot: {lotSize} &middot; LTP: {'\u20B9'}{fmtLtp(trade.ltp)}
                 </p>
               </div>
-              <button onClick={() => setTrade(defaultTrade)} className="p-1.5 rounded-full hover:bg-[#f5f5f5]">
-                <X className="size-5 text-[#666]" />
+              <button onClick={() => setTrade(defaultTrade)} className="p-1.5 rounded-full hover:bg-gray-100">
+                <X className="size-5" style={{ color: C.textDim }} />
               </button>
             </div>
 
@@ -489,19 +721,21 @@ export function OptionChainPage() {
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setTrade(t => ({ ...t, side: 'BUY' }))}
-                  className={cn(
-                    'py-2.5 rounded-lg text-sm font-bold transition-colors',
-                    trade.side === 'BUY' ? 'bg-[#00c853] text-white' : 'bg-[#f5f5f5] text-[#666]'
-                  )}
+                  className="py-2.5 rounded-lg text-sm font-bold transition-colors"
+                  style={{
+                    background: trade.side === 'BUY' ? C.green : '#F5F5F5',
+                    color: trade.side === 'BUY' ? '#fff' : C.textDim,
+                  }}
                 >
                   BUY {trade.optionType}
                 </button>
                 <button
                   onClick={() => setTrade(t => ({ ...t, side: 'SELL' }))}
-                  className={cn(
-                    'py-2.5 rounded-lg text-sm font-bold transition-colors',
-                    trade.side === 'SELL' ? 'bg-[#ff1744] text-white' : 'bg-[#f5f5f5] text-[#666]'
-                  )}
+                  className="py-2.5 rounded-lg text-sm font-bold transition-colors"
+                  style={{
+                    background: trade.side === 'SELL' ? C.red : '#F5F5F5',
+                    color: trade.side === 'SELL' ? '#fff' : C.textDim,
+                  }}
                 >
                   SELL {trade.optionType}
                 </button>
@@ -510,45 +744,48 @@ export function OptionChainPage() {
               {/* Order Type + Product Type */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[10px] font-semibold text-[#888] uppercase tracking-wide">Order Type</label>
-                  <div className="relative">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Order Type</label>
+                  <div className="relative mt-1">
                     <select
                       value={trade.orderType}
                       onChange={e => setTrade(t => ({ ...t, orderType: e.target.value as 'MARKET' | 'LIMIT' }))}
-                      className="w-full mt-1 px-3 py-2 rounded-lg border border-[#ddd] text-sm font-medium bg-white appearance-none pr-8"
+                      className="w-full px-3 py-2 rounded-lg border text-sm font-medium bg-white appearance-none pr-8"
+                      style={{ borderColor: C.border, color: C.text }}
                     >
                       <option value="MARKET">Market</option>
                       <option value="LIMIT">Limit</option>
                     </select>
-                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 size-4 text-[#888] pointer-events-none mt-0.5" />
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 size-4 pointer-events-none mt-0.5" style={{ color: C.textMuted }} />
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold text-[#888] uppercase tracking-wide">Product</label>
-                  <div className="relative">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Product</label>
+                  <div className="relative mt-1">
                     <select
                       value={trade.productType}
                       onChange={e => setTrade(t => ({ ...t, productType: e.target.value as 'INTRADAY' | 'DELIVERY' }))}
-                      className="w-full mt-1 px-3 py-2 rounded-lg border border-[#ddd] text-sm font-medium bg-white appearance-none pr-8"
+                      className="w-full px-3 py-2 rounded-lg border text-sm font-medium bg-white appearance-none pr-8"
+                      style={{ borderColor: C.border, color: C.text }}
                     >
                       <option value="INTRADAY">Intraday</option>
                       <option value="DELIVERY">Delivery</option>
                     </select>
-                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 size-4 text-[#888] pointer-events-none mt-0.5" />
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 size-4 pointer-events-none mt-0.5" style={{ color: C.textMuted }} />
                   </div>
                 </div>
               </div>
 
-              {/* Limit Price (only for LIMIT orders) */}
+              {/* Limit Price */}
               {trade.orderType === 'LIMIT' && (
                 <div>
-                  <label className="text-[10px] font-semibold text-[#888] uppercase tracking-wide">Limit Price</label>
+                  <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>Limit Price</label>
                   <input
                     type="number"
                     value={trade.limitPrice}
                     onChange={e => setTrade(t => ({ ...t, limitPrice: e.target.value }))}
                     placeholder={String(trade.ltp)}
-                    className="w-full mt-1 px-3 py-2 rounded-lg border border-[#ddd] text-sm font-mono"
+                    className="w-full mt-1 px-3 py-2 rounded-lg border text-sm font-mono"
+                    style={{ borderColor: C.border, color: C.text }}
                     step="0.05"
                   />
                 </div>
@@ -556,15 +793,16 @@ export function OptionChainPage() {
 
               {/* Quantity (Lots) */}
               <div>
-                <label className="text-[10px] font-semibold text-[#888] uppercase tracking-wide">
+                <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.textMuted }}>
                   Quantity ({trade.lots} lot{trade.lots > 1 ? 's' : ''} = {totalQty} qty)
                 </label>
                 <div className="flex items-center gap-2 mt-1">
                   <button
                     onClick={() => setTrade(t => ({ ...t, lots: Math.max(1, t.lots - 1) }))}
-                    className="w-10 h-10 rounded-lg border border-[#ddd] flex items-center justify-center hover:bg-[#f5f5f5] active:bg-[#eee]"
+                    className="w-10 h-10 rounded-lg border flex items-center justify-center hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                    style={{ borderColor: C.border }}
                   >
-                    <Minus className="size-4" />
+                    <Minus className="size-4" style={{ color: C.textDim }} />
                   </button>
                   <input
                     type="number"
@@ -573,40 +811,48 @@ export function OptionChainPage() {
                       const v = parseInt(e.target.value) || 1
                       setTrade(t => ({ ...t, lots: Math.max(1, Math.min(v, 100)) }))
                     }}
-                    className="flex-1 text-center text-lg font-bold font-mono py-2 rounded-lg border border-[#ddd]"
+                    className="flex-1 text-center text-lg font-bold font-mono py-2 rounded-lg border"
+                    style={{ borderColor: C.border, color: C.text }}
                     min={1}
                     max={100}
                   />
                   <button
                     onClick={() => setTrade(t => ({ ...t, lots: Math.min(100, t.lots + 1) }))}
-                    className="w-10 h-10 rounded-lg border border-[#ddd] flex items-center justify-center hover:bg-[#f5f5f5] active:bg-[#eee]"
+                    className="w-10 h-10 rounded-lg border flex items-center justify-center hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                    style={{ borderColor: C.border }}
                   >
-                    <Plus className="size-4" />
+                    <Plus className="size-4" style={{ color: C.textDim }} />
                   </button>
                 </div>
               </div>
 
               {/* Order Summary */}
-              <div className="bg-[#f8f9fa] rounded-lg p-3 space-y-1.5 text-xs">
+              <div className="rounded-lg p-3 space-y-1.5 text-xs" style={{ background: C.bg }}>
                 <div className="flex justify-between">
-                  <span className="text-[#888]">Price</span>
-                  <span className="font-mono font-semibold">
+                  <span style={{ color: C.textDim }}>Price</span>
+                  <span className="font-mono font-semibold" style={{ color: C.text }}>
                     {trade.orderType === 'LIMIT' && trade.limitPrice ? parseFloat(trade.limitPrice).toFixed(2) : fmtLtp(trade.ltp)}
-                    {trade.orderType === 'MARKET' && <span className="text-[#aaa] ml-1">(MKT)</span>}
+                    {trade.orderType === 'MARKET' && <span className="ml-1" style={{ color: C.textMuted }}>(MKT)</span>}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#888]">Total Value</span>
-                  <span className="font-mono font-semibold">{'\u20B9'}{totalValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span style={{ color: C.textDim }}>Total Value</span>
+                  <span className="font-mono font-semibold" style={{ color: C.text }}>
+                    {'\u20B9'}{totalValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#888]">Brokerage</span>
-                  <span className="font-mono">{'\u20B9'}{Math.round(brokerage * 100) / 100}</span>
+                  <span style={{ color: C.textDim }}>Brokerage</span>
+                  <span className="font-mono" style={{ color: C.text }}>
+                    {'\u20B9'}{Math.round(brokerage * 100) / 100}
+                  </span>
                 </div>
                 {trade.side === 'SELL' && (
-                  <div className="flex justify-between text-red-600">
-                    <span>Margin Required (150%)</span>
-                    <span className="font-mono font-semibold">{'\u20B9'}{(totalValue * 1.5).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                  <div className="flex justify-between" style={{ color: C.red }}>
+                    <span>Margin (150%)</span>
+                    <span className="font-mono font-semibold">
+                      {'\u20B9'}{(totalValue * 1.5).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </span>
                   </div>
                 )}
               </div>
@@ -615,10 +861,10 @@ export function OptionChainPage() {
               <button
                 onClick={handleConfirm}
                 disabled={fillPrice <= 0 || !token}
-                className={cn(
-                  'w-full py-3 rounded-xl text-white font-bold text-sm transition-colors disabled:opacity-40',
-                  trade.side === 'BUY' ? 'bg-[#00c853] hover:bg-[#00b248] active:bg-[#009e40]' : 'bg-[#ff1744] hover:bg-[#e51539] active:bg-[#cc1233]'
-                )}
+                className="w-full py-3 rounded-xl text-white font-bold text-sm transition-all disabled:opacity-40"
+                style={{
+                  background: trade.side === 'BUY' ? C.green : C.red,
+                }}
               >
                 {!token ? 'Login to Trade' : `${trade.side} ${trade.lots} Lot (${totalQty} Qty)`}
               </button>
@@ -636,24 +882,4 @@ export function OptionChainPage() {
       />
     </div>
   )
-}
-
-// ─── Cell Renderer ──────────────────────────────────────────────────────────
-
-function Cell({ val, fmt }: { val: number; fmt: 'ltp' | 'num' | 'oiChg' }) {
-  if (fmt === 'num') {
-    return <span className="text-center text-[#333]">{val > 0 ? fmtNum(val) : '-'}</span>
-  }
-
-  if (fmt === 'oiChg') {
-    if (val === 0) return <span className="text-center text-[#ccc]">-</span>
-    const up = val > 0
-    return (
-      <span className={cn('text-center', up ? 'text-green-600' : 'text-red-500')}>
-        {up ? '+' : ''}{fmtNum(Math.abs(val))}
-      </span>
-    )
-  }
-
-  return <span className="text-center text-[#ccc]">-</span>
 }
