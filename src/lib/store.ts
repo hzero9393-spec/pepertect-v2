@@ -12,6 +12,7 @@ export type PageId =
   | 'reports'      // Reports/analytics
   | 'watchlist'    // Watchlist page
   | 'futures'      // Futures trading
+  | 'optionChain'  // Real-time option chain
   | 'learning'     // Learn section
   | 'profile'      // Profile/settings
   | 'activeDevices' // Active devices/sessions detail
@@ -40,6 +41,7 @@ const pageToUrlMap: Record<PageId, string> = {
   reports: '/reports',
   watchlist: '/watchlist',
   futures: '/futures',
+  optionChain: '/option-chain',
   learning: '/learning',
   profile: '/profile',
   activeDevices: '/active-devices',
@@ -79,6 +81,7 @@ export function parseUrlPath(pathname: string): { page: PageId; stockSymbol?: st
   if (path === '/portfolio') return { page: 'portfolio' }
   if (path === '/reports') return { page: 'reports' }
   if (path === '/futures') return { page: 'futures' }
+  if (path === '/option-chain') return { page: 'optionChain' }
   if (path === '/learning') return { page: 'learning' }
   if (path === '/profile') return { page: 'profile' }
   if (path === '/active-devices') return { page: 'activeDevices' }

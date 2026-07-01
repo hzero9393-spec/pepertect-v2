@@ -10,12 +10,12 @@ import {
   GraduationCap,
   LogOut,
   TrendingUp,
-  
   Settings,
   Crown,
   Lock,
   ChevronRight,
   Star,
+  GitBranch,
 } from 'lucide-react'
 import { useAppStore, type PageId } from '@/lib/store'
 import { useAuthStore } from '@/lib/auth-store'
@@ -40,6 +40,7 @@ const navItems: NavItem[] = [
   { id: 'trading', label: 'Stocks', icon: CandlestickChart, group: 'trade', url: '/stocks' },
   { id: 'watchlist', label: 'Watchlist', icon: Star, group: 'trade', url: '/watchlist' },
   { id: 'futures', label: 'Futures', icon: TrendingUp, group: 'trade', requiredFeature: 'futuresAccess', requiredPlan: 'PRO', url: '/futures' },
+  { id: 'optionChain', label: 'Option Chain', icon: GitBranch, group: 'trade', url: '/option-chain' },
   // Manage group
   { id: 'positions', label: 'Positions', icon: Crosshair, group: 'manage', url: '/positions' },
   { id: 'orders', label: 'Orders', icon: FileText, group: 'manage', url: '/orders' },
