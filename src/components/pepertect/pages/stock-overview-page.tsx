@@ -733,13 +733,6 @@ export function StockOverviewPage() {
     setCurrentPage('positions')
   }, [setCurrentPage])
 
-  // ─── Navigate to option chain page ──────────────────────────────
-  const handleViewFullOptionChain = () => {
-    if (stockDetail) {
-      useAppStore.getState().setSelectedStockSymbol(stockDetail.symbol)
-      setCurrentPage('optionChain')
-    }
-  }
 
   // ─── Loading state ──────────────────────────────────────────────
   if (detailLoading && !stockDetail) {
@@ -1535,20 +1528,7 @@ export function StockOverviewPage() {
                     </div>
                   )}
 
-                  {/* View Full Option Chain Button */}
-                  {fnoData?.optionChain && fnoData.optionChain.length > 0 && (
-                    <div className="mt-4 flex justify-center">
-                      <Button
-                        variant="outline"
-                        className="border-[#00D09C]/30 text-[#00D09C] hover:bg-[#00D09C]/5 font-semibold gap-2"
-                        onClick={handleViewFullOptionChain}
-                      >
-                        <Eye className="size-4" />
-                        View Full Option Chain
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
+                  </CardContent>
               </Card>
 
               {/* ─── F&O Quick Trade Button ──────────────────────────── */}

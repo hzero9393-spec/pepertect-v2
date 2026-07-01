@@ -969,7 +969,7 @@ export function PositionsPage() {
               <Button
                 size="sm"
                 className="mt-6 gap-1.5 bg-[#00D09C] hover:bg-[#00b88a] text-white font-semibold rounded-xl px-5"
-                onClick={() => setCurrentPage(segmentTab === 'stocks' ? 'trading' : 'optionChain')}
+                onClick={() => setCurrentPage(segmentTab === 'stocks' ? 'trading' : 'futures')}
               >
                 <TrendingUp className="size-3.5" />
                 Start {segmentTab === 'stocks' ? 'Stock' : 'Index'} Trading

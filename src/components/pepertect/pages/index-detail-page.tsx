@@ -11,9 +11,7 @@ import {
   ArrowDownRight,
   ArrowLeft,
   BarChart3,
-  GitBranch,
   ArrowRight,
-  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatINR, formatNumber } from '@/lib/format'
@@ -72,21 +70,6 @@ interface OptionSideData {
   vega?: number
 }
 
-interface OptionChainItem {
-  strikePrice: number
-  expiryDate?: string
-  ce: OptionSideData | null
-  pe: OptionSideData | null
-}
-
-interface OptionChainResponse {
-  chain: OptionChainItem[]
-  spot: number
-  pcr: number
-  maxPain: number
-  isRealData: boolean
-  dataSource: string
-}
 
 type RangeOption = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y' | '5Y'
 
@@ -189,9 +172,6 @@ export function IndexDetailPage() {
   const [chartLoading, setChartLoading] = useState(false)
   const [chartType, setChartType] = useState<'area' | 'candle'>('area')
 
-  // Option chain state
-  const [optionChainData, setOptionChainData] = useState<OptionChainResponse | null>(null)
-  const [optionChainLoading, setOptionChainLoading] = useState(false)
 
   // Fetch index detail
   const fetchDetail = useCallback(async () => {
@@ -242,30 +222,6 @@ export function IndexDetailPage() {
     }
   }, [symbol, range, fetchChart])
 
-  // Fetch option chain
-  const fetchOptionChain = useCallback(async () => {
-    if (!symbol) return
-    setOptionChainLoading(true)
-    try {
-      const res = await fetch(`/api/options/chain/${symbol}`)
-      if (res.ok) {
-        const json = await res.json()
-        if (json.success) setOptionChainData(json.data)
-      }
-    } catch {
-      // Keep previous data or null
-    } finally {
-      setOptionChainLoading(false)
-    }
-  }, [symbol])
-
-  useEffect(() => {
-    if (symbol) {
-      fetchOptionChain()
-      const interval = setInterval(fetchOptionChain, 2000)
-      return () => clearInterval(interval)
-    }
-  }, [symbol, fetchOptionChain])
 
   // Chart data for Recharts
   const chartDataFormatted = useMemo(() => {
@@ -363,16 +319,7 @@ export function IndexDetailPage() {
               )}
             </div>
 
-            {/* Right: Option Chain button */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-[#00D09C] border-[#00D09C]/30 hover:bg-[#00D09C]/10 hover:text-[#00D09C] font-semibold shrink-0"
-              onClick={() => setCurrentPage('optionChain')}
-            >
-              <GitBranch className="size-4" />
-              Option Chain
-            </Button>
+
           </div>
         </div>
       </div>
@@ -419,7 +366,7 @@ export function IndexDetailPage() {
                 )}
                 aria-label="Candle chart"
               >
-                <GitBranch className="size-4" />
+                <CandlestickChart className="size-4" />
               </button>
             </div>
           </div>
@@ -561,208 +508,7 @@ export function IndexDetailPage() {
           )}
         </div>
 
-        {/* ── Option Chain Quick View ────────────────────────────────── */}
-        <div className="bg-white border border-[#e5e7eb] rounded-xl overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center justify-between p-4 sm:p-6 border-b border-[#e5e7eb]">
-            <div className="flex items-center gap-2">
-              <GitBranch className="size-4 text-[#00D09C]" />
-              <h3 className="text-sm font-semibold text-[#1a1a1a]">Option Chain</h3>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1 text-[#00D09C] hover:text-[#00B386] hover:bg-[#00D09C]/10 font-semibold text-xs"
-              onClick={() => {
-                if (symbol) {
-                  setSelectedIndexSymbol(symbol)
-                }
-                setCurrentPage('optionChain')
-              }}
-            >
-              View Full
-              <ArrowRight className="size-3.5" />
-            </Button>
-          </div>
 
-          {optionChainLoading && !optionChainData ? (
-            /* Loading skeleton */
-            <div className="p-4 sm:p-6 space-y-4">
-              <div className="flex gap-4">
-                <Skeleton className="h-16 w-32 rounded-lg" />
-                <Skeleton className="h-16 w-32 rounded-lg" />
-              </div>
-              <div className="space-y-2">
-                <Skeleton className="h-8 w-full rounded" />
-                <Skeleton className="h-8 w-full rounded" />
-                <Skeleton className="h-8 w-full rounded" />
-                <Skeleton className="h-8 w-full rounded" />
-                <Skeleton className="h-8 w-full rounded" />
-              </div>
-            </div>
-          ) : !optionChainData || optionChainData.chain.length === 0 ? (
-            /* No data */
-            <div className="p-4 sm:p-6 flex flex-col items-center justify-center py-12 text-[#6b7280]">
-              <GitBranch className="size-8 mb-2 opacity-40" />
-              <p className="text-sm font-medium">No option chain data</p>
-              <p className="text-xs mt-1">Option chain data is not available for this index</p>
-            </div>
-          ) : (
-            <>
-              {/* PCR & Max Pain summary */}
-              <div className="p-4 sm:p-6 border-b border-[#e5e7eb]">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg px-4 py-2.5">
-                    <p className="text-[10px] font-semibold text-[#6b7280] tracking-wider uppercase mb-0.5">PCR</p>
-                    <p className={cn(
-                      'font-mono font-tabular font-bold text-lg',
-                      optionChainData.pcr > 1 ? 'text-[#00B386]' : optionChainData.pcr < 0.5 ? 'text-[#EB5B3C]' : 'text-[#1a1a1a]'
-                    )}>
-                      {optionChainData.pcr.toFixed(2)}
-                    </p>
-                  </div>
-                  <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg px-4 py-2.5">
-                    <p className="text-[10px] font-semibold text-[#6b7280] tracking-wider uppercase mb-0.5">Max Pain</p>
-                    <p className="font-mono font-tabular font-bold text-lg text-[#1a1a1a]">
-                      {optionChainData.maxPain.toLocaleString('en-IN')}
-                    </p>
-                  </div>
-                  {optionChainData.spot > 0 && (
-                    <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg px-4 py-2.5">
-                      <p className="text-[10px] font-semibold text-[#6b7280] tracking-wider uppercase mb-0.5">Spot</p>
-                      <p className="font-mono font-tabular font-bold text-lg text-[#1a1a1a]">
-                        {optionChainData.spot.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                      </p>
-                    </div>
-                  )}
-                  {optionChainLoading && (
-                    <Loader2 className="size-4 text-[#00D09C] animate-spin ml-auto" />
-                  )}
-                </div>
-              </div>
-
-              {/* Compact Option Chain Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-[#e5e7eb] bg-[#fafafa]">
-                      <th className="px-3 py-2.5 text-right font-semibold text-[#6b7280] tracking-wider uppercase">CE OI</th>
-                      <th className="px-3 py-2.5 text-right font-semibold text-[#6b7280] tracking-wider uppercase">CE LTP</th>
-                      <th className="px-3 py-2.5 text-right font-semibold text-[#6b7280] tracking-wider uppercase">CE Chg%</th>
-                      <th className="px-3 py-2.5 text-center font-semibold text-[#1a1a1a] tracking-wider uppercase bg-[#f0f0f0]">Strike</th>
-                      <th className="px-3 py-2.5 text-left font-semibold text-[#6b7280] tracking-wider uppercase">PE Chg%</th>
-                      <th className="px-3 py-2.5 text-left font-semibold text-[#6b7280] tracking-wider uppercase">PE LTP</th>
-                      <th className="px-3 py-2.5 text-left font-semibold text-[#6b7280] tracking-wider uppercase">PE OI</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const spot = optionChainData.spot || detail?.currentPrice || 0
-                      const chain = optionChainData.chain
-                      if (chain.length === 0) return null
-
-                      // Find ATM index (closest strike to spot)
-                      let atmIdx = 0
-                      let minDiff = Infinity
-                      chain.forEach((item, idx) => {
-                        const diff = Math.abs(item.strikePrice - spot)
-                        if (diff < minDiff) {
-                          minDiff = diff
-                          atmIdx = idx
-                        }
-                      })
-
-                      // Get 5 above and 5 below ATM (11 rows total)
-                      const startIdx = Math.max(0, atmIdx - 5)
-                      const endIdx = Math.min(chain.length - 1, atmIdx + 5)
-                      const visibleChain = chain.slice(startIdx, endIdx + 1)
-
-                      return visibleChain.map((item, vIdx) => {
-                        const isATM = item.strikePrice === chain[atmIdx].strikePrice
-                        const isCEITM = spot > item.strikePrice
-                        const isPEITM = spot < item.strikePrice
-
-                        return (
-                          <tr
-                            key={`${item.strikePrice}-${vIdx}`}
-                            className={cn(
-                              'border-b border-[#e5e7eb]/60 transition-colors',
-                              isATM ? 'bg-[#00D09C]/8 font-semibold' : isCEITM ? 'bg-[#00B386]/5' : isPEITM ? 'bg-[#EB5B3C]/5' : 'hover:bg-[#fafafa]'
-                            )}
-                          >
-                            {/* CE OI */}
-                            <td className={cn('px-3 py-2 font-mono font-tabular text-right', isCEITM ? 'text-[#00B386]' : 'text-[#1a1a1a]')}>
-                              {item.ce?.openInterest != null ? formatNumber(item.ce.openInterest) : '-'}
-                            </td>
-                            {/* CE LTP */}
-                            <td className={cn('px-3 py-2 font-mono font-tabular text-right', isCEITM ? 'text-[#00B386]' : 'text-[#1a1a1a]')}>
-                              {item.ce?.ltp != null ? item.ce.ltp.toFixed(2) : '-'}
-                            </td>
-                            {/* CE Chg% */}
-                            <td className={cn('px-3 py-2 font-mono font-tabular text-right',
-                              item.ce?.changePercent != null
-                                ? item.ce.changePercent >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'
-                                : 'text-[#6b7280]'
-                            )}>
-                              {item.ce?.changePercent != null ? `${item.ce.changePercent >= 0 ? '+' : ''}${item.ce.changePercent.toFixed(2)}%` : '-'}
-                            </td>
-                            {/* Strike */}
-                            <td className={cn(
-                              'px-3 py-2 font-mono font-tabular text-center bg-[#f0f0f0]/60 border-x border-[#e5e7eb]/40',
-                              isATM ? 'text-[#00D09C] font-bold' : 'text-[#1a1a1a] font-semibold'
-                            )}>
-                              <div className="flex items-center justify-center gap-1">
-                                {isATM && <span className="size-1.5 rounded-full bg-[#00D09C] shrink-0" />}
-                                {item.strikePrice.toLocaleString('en-IN')}
-                              </div>
-                            </td>
-                            {/* PE Chg% */}
-                            <td className={cn('px-3 py-2 font-mono font-tabular text-left',
-                              item.pe?.changePercent != null
-                                ? item.pe.changePercent >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'
-                                : 'text-[#6b7280]'
-                            )}>
-                              {item.pe?.changePercent != null ? `${item.pe.changePercent >= 0 ? '+' : ''}${item.pe.changePercent.toFixed(2)}%` : '-'}
-                            </td>
-                            {/* PE LTP */}
-                            <td className={cn('px-3 py-2 font-mono font-tabular text-left', isPEITM ? 'text-[#EB5B3C]' : 'text-[#1a1a1a]')}>
-                              {item.pe?.ltp != null ? item.pe.ltp.toFixed(2) : '-'}
-                            </td>
-                            {/* PE OI */}
-                            <td className={cn('px-3 py-2 font-mono font-tabular text-left', isPEITM ? 'text-[#EB5B3C]' : 'text-[#1a1a1a]')}>
-                              {item.pe?.openInterest != null ? formatNumber(item.pe.openInterest) : '-'}
-                            </td>
-                          </tr>
-                        )
-                      })
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Footer hint */}
-              <div className="px-4 sm:px-6 py-3 border-t border-[#e5e7eb] bg-[#fafafa] flex items-center justify-between">
-                <p className="text-[10px] text-[#6b7280]">
-                  Showing 11 strikes around ATM &middot; Refreshes every 2s
-                </p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="gap-1 text-[#00D09C] hover:text-[#00B386] hover:bg-[#00D09C]/10 font-semibold text-xs h-7"
-                  onClick={() => {
-                    if (symbol) {
-                      setSelectedIndexSymbol(symbol)
-                    }
-                    setCurrentPage('optionChain')
-                  }}
-                >
-                  Full Chain
-                  <ArrowRight className="size-3" />
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
       </div>
     </div>
   )

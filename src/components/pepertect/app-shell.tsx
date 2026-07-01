@@ -15,7 +15,6 @@ import { PositionsPage } from '@/components/pepertect/pages/positions-page'
 import { ReportsPage } from '@/components/pepertect/pages/reports-page'
 import { ProfilePage } from '@/components/pepertect/pages/profile-page'
 import { StockOverviewPage } from '@/components/pepertect/pages/stock-overview-page'
-import { OptionChainPage } from '@/components/pepertect/pages/option-chain-page'
 import { IndexDetailPage } from '@/components/pepertect/pages/index-detail-page'
 import { FuturesPage } from '@/components/pepertect/pages/futures-page'
 import { LearningPage } from '@/components/pepertect/pages/learning-page'
@@ -69,8 +68,6 @@ function PageContent({ page }: { page: string }) {
       return <ReportsPage />
     case 'indexDetail':
       return <IndexDetailPage />
-    case 'optionChain':
-      return <OptionChainPage />
     case 'futures':
       return <FuturesPage />
     case 'learning':

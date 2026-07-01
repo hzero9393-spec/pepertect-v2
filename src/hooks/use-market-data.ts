@@ -643,36 +643,6 @@ export function useStockQuote(symbol: string) {
   return { quote, status }
 }
 
-/**
- * Hook to get real-time option chain data
- */
-export function useOptionChain(underlying: string, expiry?: string) {
-  const [data, setData] = useState<WsOptionChainUpdate | null>(null)
-  const [status, setStatus] = useState<ConnectionStatus>('disconnected')
-
-  useEffect(() => {
-    if (!underlying) return
-    const manager = MarketDataManager.getInstance()
-    manager.connect()
-
-    manager.subscribeOptionChain(underlying, expiry)
-
-    const unsubHandler = manager.onOptionChainUpdate(underlying, (update) => {
-      if (expiry && update.expiry && update.expiry !== expiry) return
-      setData(update)
-    })
-
-    const unsubStatus = manager.onStatusChange((s) => setStatus(s))
-
-    return () => {
-      manager.unsubscribeOptionChain(underlying, expiry)
-      unsubHandler()
-      unsubStatus()
-    }
-  }, [underlying, expiry])
-
-  return { data, status }
-}
 
 /**
  * Hook to get connection status only

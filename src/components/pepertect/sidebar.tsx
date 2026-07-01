@@ -10,7 +10,7 @@ import {
   GraduationCap,
   LogOut,
   TrendingUp,
-  GitBranch,
+  
   Settings,
   Crown,
   Lock,
@@ -39,7 +39,6 @@ const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard, group: 'trade', url: '/' },
   { id: 'trading', label: 'Stocks', icon: CandlestickChart, group: 'trade', url: '/stocks' },
   { id: 'watchlist', label: 'Watchlist', icon: Star, group: 'trade', url: '/watchlist' },
-  { id: 'optionChain', label: 'Option Chain', icon: GitBranch, group: 'trade', requiredFeature: 'optionsAccess', requiredPlan: 'PREMIUM', url: '/option-chain' },
   { id: 'futures', label: 'Futures', icon: TrendingUp, group: 'trade', requiredFeature: 'futuresAccess', requiredPlan: 'PRO', url: '/futures' },
   // Manage group
   { id: 'positions', label: 'Positions', icon: Crosshair, group: 'manage', url: '/positions' },

@@ -2,24 +2,14 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useAuthStore } from '@/lib/auth-store'
-import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
-import { toast } from 'sonner'
 import {
   Sheet,
   SheetContent,
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
   TrendingUp,
@@ -28,16 +18,9 @@ import {
   ArrowDownRight,
   X,
   BarChart3,
-  GitBranch,
   Activity,
   Info,
   Clock,
-  ChevronLeft,
-  ChevronRight,
-  Minus,
-  Plus,
-  Loader2,
-  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -83,21 +66,6 @@ interface CandleData {
   volume: number
 }
 
-interface OptionRow {
-  strike: number
-  ceOI: number
-  ceOIChngPct: number
-  ceLTP: number
-  ceChngPct: number
-  ceIV: number
-  ceVolume: number
-  peVolume: number
-  peIV: number
-  peChngPct: number
-  peLTP: number
-  peOIChngPct: number
-  peOI: number
-}
 
 type RangeOption = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y' | '5Y'
 
@@ -109,61 +77,6 @@ function formatDate(dateStr: string, range: RangeOption): string {
   return d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
 }
 
-// ─── Mock Option Chain Generator ────────────────────────────────────────────
-
-function generateOptionChain(spotPrice: number, strikeInterval: number): OptionRow[] {
-  const strikes: number[] = []
-  const range = strikeInterval * 10
-  const startStrike = Math.floor((spotPrice - range) / strikeInterval) * strikeInterval
-  const endStrike = Math.ceil((spotPrice + range) / strikeInterval) * strikeInterval
-
-  for (let s = startStrike; s <= endStrike; s += strikeInterval) {
-    strikes.push(s)
-  }
-
-  return strikes.map((strike) => {
-    const diffFromSpot = strike - spotPrice
-    const isATM = Math.abs(diffFromSpot) < strikeInterval / 2
-    const ceITM = strike < spotPrice
-    const peITM = strike > spotPrice
-
-    const ceIntrinsic = ceITM ? spotPrice - strike : 0
-    const ceTimeValue = Math.max(50, (250 - Math.abs(diffFromSpot) * 0.3) * (isATM ? 1.2 : 1))
-    const ceLTP = Math.max(0.05, ceIntrinsic + ceTimeValue * (0.6 + Math.random() * 0.8))
-    const ceChngPct = (Math.random() - 0.5) * 20
-    const ceIV = Math.max(5, 18 - diffFromSpot * 0.01 + Math.random() * 8)
-    const ceOI = Math.max(0.5, (isATM ? 80 : 40 - Math.abs(diffFromSpot) * 0.04) * (0.5 + Math.random()))
-    const ceOIChngPct = (Math.random() - 0.4) * 30
-    const ceVolume = Math.max(100, ceOI * 1000 * (0.3 + Math.random() * 0.7))
-
-    const peIntrinsic = peITM ? strike - spotPrice : 0
-    const peTimeValue = Math.max(50, (250 - Math.abs(diffFromSpot) * 0.3) * (isATM ? 1.2 : 1))
-    const peLTP = Math.max(0.05, peIntrinsic + peTimeValue * (0.6 + Math.random() * 0.8))
-    const peChngPct = (Math.random() - 0.5) * 20
-    const peIV = Math.max(5, 18 + diffFromSpot * 0.01 + Math.random() * 8)
-    const peOI = Math.max(0.5, (isATM ? 85 : 45 - Math.abs(diffFromSpot) * 0.04) * (0.5 + Math.random()))
-    const peOIChngPct = (Math.random() - 0.4) * 30
-    const peVolume = Math.max(100, peOI * 1000 * (0.3 + Math.random() * 0.7))
-
-    return {
-      strike,
-      ceOI: Number(ceOI.toFixed(1)),
-      ceOIChngPct: Number(ceOIChngPct.toFixed(1)),
-      ceLTP: Number(ceLTP.toFixed(2)),
-      ceChngPct: Number(ceChngPct.toFixed(1)),
-      ceIV: Number(ceIV.toFixed(1)),
-      ceVolume: Math.round(ceVolume),
-      peVolume: Math.round(peVolume),
-      peIV: Number(peIV.toFixed(1)),
-      peChngPct: Number(peChngPct.toFixed(1)),
-      peLTP: Number(peLTP.toFixed(2)),
-      peOIChngPct: Number(peOIChngPct.toFixed(1)),
-      peOI: Number(peOI.toFixed(1)),
-    }
-  })
-}
-
-// getOIColorClass removed - simplified option chain
 
 // ─── Chart Tooltip ──────────────────────────────────────────────────────────
 
@@ -217,16 +130,6 @@ export function IndexDetailDrawer({ open, onOpenChange, symbol }: IndexDetailDra
   const [activeTab, setActiveTab] = useState('chart')
   const [chartType, setChartType] = useState<'area' | 'candle'>('area')
 
-  // Trade modal state
-  const [tradeModalOpen, setTradeModalOpen] = useState(false)
-  const [tradeRow, setTradeRow] = useState<OptionRow | null>(null)
-  const [tradeSide, setTradeSide] = useState<'CE' | 'PE'>('CE')
-
-  const handleOptionClick = (row: OptionRow, side: 'CE' | 'PE') => {
-    setTradeRow(row)
-    setTradeSide(side)
-    setTradeModalOpen(true)
-  }
 
   // Fetch index detail
   const fetchDetail = useCallback(async () => {
@@ -275,112 +178,6 @@ export function IndexDetailDrawer({ open, onOpenChange, symbol }: IndexDetailDra
     }
   }, [open, symbol, range, fetchChart])
 
-  // Real option chain from API
-  const [optionChainData, setOptionChainData] = useState<OptionRow[]>([])
-  const [optionChainLoading, setOptionChainLoading] = useState(false)
-
-  const fetchOptionChain = useCallback(async () => {
-    if (!symbol) return
-    setOptionChainLoading(true)
-    try {
-      const res = await fetch(`/api/options/chain/${symbol}`)
-      if (res.ok) {
-        const json = await res.json()
-        if (json.success && json.data?.chain?.length > 0) {
-          const apiData = json.data
-          const spot = apiData.spot || detail?.currentPrice || 0
-          const strikeInterval = detail?.strikeInterval || 50
-          
-          // Group options by strike price
-          const strikeMap = new Map<number, { ce?: Record<string, unknown>; pe?: Record<string, unknown> }>()
-          for (const opt of apiData.chain as Record<string, unknown>[]) {
-            const strike = opt.strikePrice as number
-            if (!strikeMap.has(strike)) strikeMap.set(strike, {})
-            const type = opt.optionType as string
-            if (type === 'CE') strikeMap.get(strike)!.ce = opt
-            else strikeMap.get(strike)!.pe = opt
-          }
-          
-          const rows: OptionRow[] = []
-          for (const [strike, data] of strikeMap) {
-            const diffFromSpot = strike - spot
-            const isATM = Math.abs(diffFromSpot) < strikeInterval / 2
-            
-            // If we have real data, use it; otherwise generate estimates
-            const ceOI = (data.ce?.openInterest as number) || (isATM ? 80 : 40) * (0.5 + Math.random())
-            const peOI = (data.pe?.openInterest as number) || (isATM ? 85 : 45) * (0.5 + Math.random())
-            
-            rows.push({
-              strike,
-              ceOI: Number(ceOI.toFixed(1)),
-              ceOIChngPct: Number(((data.ce?.oiChangePercent as number) || (Math.random() - 0.4) * 30).toFixed(1)),
-              ceLTP: Number(((data.ce?.ltp as number) || 0).toFixed(2)),
-              ceChngPct: Number(((data.ce?.changePercent as number) || 0).toFixed(1)),
-              ceIV: Number(((data.ce?.impliedVolatility as number) || 0).toFixed(1)),
-              ceVolume: Math.round((data.ce?.volume as number) || 0),
-              peVolume: Math.round((data.pe?.volume as number) || 0),
-              peIV: Number(((data.pe?.impliedVolatility as number) || 0).toFixed(1)),
-              peChngPct: Number(((data.pe?.changePercent as number) || 0).toFixed(1)),
-              peLTP: Number(((data.pe?.ltp as number) || 0).toFixed(2)),
-              peOIChngPct: Number(((data.pe?.oiChangePercent as number) || (Math.random() - 0.4) * 30).toFixed(1)),
-              peOI: Number(peOI.toFixed(1)),
-            })
-          }
-          
-          rows.sort((a, b) => a.strike - b.strike)
-          setOptionChainData(rows)
-        } else {
-          // Fallback to generated data if API returns empty
-          if (detail) {
-            setOptionChainData(generateOptionChain(detail.currentPrice, detail.strikeInterval))
-          }
-        }
-      } else {
-        // Fallback on error
-        if (detail) {
-          setOptionChainData(generateOptionChain(detail.currentPrice, detail.strikeInterval))
-        }
-      }
-    } catch {
-      // Fallback on network error
-      if (detail) {
-        setOptionChainData(generateOptionChain(detail.currentPrice, detail.strikeInterval))
-      }
-    } finally {
-      setOptionChainLoading(false)
-    }
-  }, [symbol, detail])
-
-  // Fetch option chain when drawer opens or when user switches to optionChain tab
-  useEffect(() => {
-    if (open && symbol && (activeTab === 'optionChain' || activeTab === 'chart')) {
-      fetchOptionChain()
-    }
-  }, [open, symbol, activeTab, fetchOptionChain])
-
-  const optionChain = optionChainData
-
-  // Option chain stats
-  const optionStats = useMemo(() => {
-    if (optionChain.length === 0) return { pcr: 0, maxPain: 0, highestCEOI: optionChain[0], highestPEOI: optionChain[0] }
-    const totalCEOI = optionChain.reduce((s, r) => s + r.ceOI, 0)
-    const totalPEOI = optionChain.reduce((s, r) => s + r.peOI, 0)
-    const pcr = totalCEOI > 0 ? totalPEOI / totalCEOI : 0
-    const maxPainStrike = optionChain.reduce(
-      (max, r) => {
-        const pain = optionChain.reduce((acc, d) => {
-          const cePain = d.strike < r.strike ? (r.strike - d.strike) * d.ceOI : 0
-          const pePain = d.strike > r.strike ? (d.strike - r.strike) * d.peOI : 0
-          return acc + cePain + pePain
-        }, 0)
-        return pain > max.pain ? { strike: r.strike, pain } : max
-      },
-      { strike: 0, pain: 0 }
-    ).strike
-    const highestCEOI = optionChain.reduce((max, r) => (r.ceOI > max.ceOI ? r : max), optionChain[0])
-    const highestPEOI = optionChain.reduce((max, r) => (r.peOI > max.peOI ? r : max), optionChain[0])
-    return { pcr, maxPain: maxPainStrike, highestCEOI, highestPEOI, totalCEOI, totalPEOI }
-  }, [optionChain])
 
   // Chart data for Recharts
   const chartDataFormatted = useMemo(() => {
@@ -451,15 +248,6 @@ export function IndexDetailDrawer({ open, onOpenChange, symbol }: IndexDetailDra
               )}
             </div>
             <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-[#00D09C] border-[#00D09C]/30 hover:bg-[#00D09C]/10 hover:text-[#00D09C] font-semibold shrink-0"
-              onClick={() => setActiveTab('optionChain')}
-            >
-              <GitBranch className="size-4" />
-              Option Chain
-            </Button>
-            <Button
               variant="ghost"
               size="icon"
               className="text-[#6b7280] hover:text-[#1a1a1a] shrink-0"
@@ -480,13 +268,6 @@ export function IndexDetailDrawer({ open, onOpenChange, symbol }: IndexDetailDra
               >
                 <BarChart3 className="size-4 mr-1.5" />
                 Chart
-              </TabsTrigger>
-              <TabsTrigger
-                value="optionChain"
-                className="rounded-lg px-4 py-2 text-sm font-semibold data-[state=active]:bg-[#00D09C] data-[state=active]:text-white transition-all"
-              >
-                <GitBranch className="size-4 mr-1.5" />
-                Option Chain
               </TabsTrigger>
               <TabsTrigger
                 value="stats"
@@ -534,7 +315,7 @@ export function IndexDetailDrawer({ open, onOpenChange, symbol }: IndexDetailDra
                       chartType === 'candle' ? 'bg-[#f5f7fa] text-[#00D09C]' : 'text-[#6b7280] hover:text-[#1a1a1a]'
                     )}
                   >
-                    <GitBranch className="size-4" />
+                    <CandlestickChart className="size-4" />
                   </button>
                 </div>
               </div>
@@ -647,150 +428,6 @@ export function IndexDetailDrawer({ open, onOpenChange, symbol }: IndexDetailDra
               </div>
             </TabsContent>
 
-            {/* ═══ Option Chain Tab ═════════════════════════════════════════ */}
-            <TabsContent value="optionChain" className="mt-4 space-y-3">
-              {/* Quick Stats */}
-              <div className="flex items-center gap-4 text-xs bg-white border border-[#e5e7eb] rounded-lg p-2.5">
-                <div className="flex items-center gap-1">
-                  <span className="text-[#6b7280]">Spot</span>
-                  <span className="font-mono font-tabular font-bold text-[#1a1a1a]">{detail?.currentPrice.toLocaleString('en-IN') || '--'}</span>
-                </div>
-                <div className="h-3 w-px bg-[#e5e7eb]" />
-                <div className="flex items-center gap-1">
-                  <span className="text-[#6b7280]">PCR</span>
-                  <span className={cn(
-                    'font-mono font-tabular font-bold',
-                    optionStats.pcr > 1 ? 'text-[#00B386]' : optionStats.pcr < 0.7 ? 'text-[#EB5B3C]' : 'text-[#1a1a1a]'
-                  )}>
-                    {optionStats.pcr.toFixed(2)}
-                  </span>
-                </div>
-                <div className="h-3 w-px bg-[#e5e7eb]" />
-                <div className="flex items-center gap-1">
-                  <span className="text-[#6b7280]">Max Pain</span>
-                  <span className="font-mono font-tabular font-bold text-[#1a1a1a]">{optionStats.maxPain.toLocaleString()}</span>
-                </div>
-              </div>
-
-              {/* Loading State */}
-              {optionChainLoading && (
-                <div className="flex items-center justify-center py-8">
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="flex gap-1.5">
-                      <div className="size-2 rounded-full bg-[#1a1a1a] animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="size-2 rounded-full bg-[#1a1a1a] animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="size-2 rounded-full bg-[#1a1a1a] animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
-                    <span className="text-xs text-[#6b7280]">Loading option chain...</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Simplified Option Chain Table - Groww Style */}
-              <div className="bg-white border border-[#e5e7eb] rounded-xl overflow-hidden">
-                <div className="overflow-x-auto custom-scrollbar max-h-[420px] overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 z-10">
-                      <tr className="bg-[#1a1a1a] text-white">
-                        <th colSpan={4} className="text-center py-2 font-semibold text-xs tracking-wider">
-                          CALLS
-                        </th>
-                        <th className="text-center py-2 bg-[#374151] font-bold text-xs border-x border-[#4b5563]">
-                          STRIKE
-                        </th>
-                        <th colSpan={4} className="text-center py-2 font-semibold text-xs tracking-wider">
-                          PUTS
-                        </th>
-                      </tr>
-                      <tr className="bg-[#f9fafb] border-b border-[#e5e7eb] text-[#6b7280]">
-                        <th className="px-1.5 py-1.5 text-right font-medium">OI(L)</th>
-                        <th className="px-1.5 py-1.5 text-right font-medium">Vol</th>
-                        <th className="px-1.5 py-1.5 text-right font-medium">LTP</th>
-                        <th className="px-1.5 py-1.5 text-right font-medium">Chg%</th>
-                        <th className="px-1.5 py-1.5 text-center font-bold bg-[#f3f4f6] border-x border-[#e5e7eb] text-[#1a1a1a]">₹</th>
-                        <th className="px-1.5 py-1.5 text-left font-medium">Chg%</th>
-                        <th className="px-1.5 py-1.5 text-left font-medium">LTP</th>
-                        <th className="px-1.5 py-1.5 text-left font-medium">Vol</th>
-                        <th className="px-1.5 py-1.5 text-left font-medium">OI(L)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {optionChain.map((row) => {
-                        const isATM = detail && row.strike === Math.round(detail.currentPrice / detail.strikeInterval) * detail.strikeInterval
-                        const ceITM = detail && row.strike < detail.currentPrice
-                        const peITM = detail && row.strike > detail.currentPrice
-
-                        return (
-                          <tr
-                            key={row.strike}
-                            className={cn(
-                              'border-b border-[#f3f4f6] transition-colors',
-                              isATM && 'bg-[#1a1a1a]/5'
-                            )}
-                          >
-                            {/* CE Side */}
-                            <td className={cn('px-1.5 py-1 text-right font-mono font-tabular text-[#6b7280]', ceITM && 'bg-[#00B386]/6')}>
-                              {row.ceOI.toFixed(1)}
-                            </td>
-                            <td className={cn('px-1.5 py-1 text-right font-mono font-tabular text-[#9ca3af]', ceITM && 'bg-[#00B386]/6')}>
-                              {row.ceVolume > 0 ? `${(row.ceVolume / 1000).toFixed(0)}K` : '-'}
-                            </td>
-                            <td
-                              className={cn(
-                                'px-1.5 py-1 text-right font-mono font-tabular font-semibold text-[#1a1a1a] cursor-pointer hover:text-[#00B386] hover:underline',
-                                ceITM && 'bg-[#00B386]/6'
-                              )}
-                              onClick={() => handleOptionClick(row, 'CE')}
-                            >
-                              {row.ceLTP.toFixed(2)}
-                            </td>
-                            <td className={cn(
-                              'px-1.5 py-1 text-right font-mono',
-                              row.ceChngPct > 0 ? 'text-[#00B386]' : row.ceChngPct < 0 ? 'text-[#EB5B3C]' : 'text-[#9ca3af]',
-                              ceITM && 'bg-[#00B386]/6'
-                            )}>
-                              {row.ceChngPct > 0 ? '+' : ''}{row.ceChngPct.toFixed(1)}%
-                            </td>
-
-                            {/* Strike */}
-                            <td className={cn(
-                              'px-2 py-1 text-center font-mono font-tabular font-bold bg-[#f9fafb] border-x border-[#e5e7eb]',
-                              isATM ? 'text-[#1a1a1a] bg-[#1a1a1a]/10' : 'text-[#1a1a1a]'
-                            )}>
-                              {row.strike.toLocaleString()}
-                            </td>
-
-                            {/* PE Side */}
-                            <td className={cn(
-                              'px-1.5 py-1 text-left font-mono',
-                              row.peChngPct > 0 ? 'text-[#00B386]' : row.peChngPct < 0 ? 'text-[#EB5B3C]' : 'text-[#9ca3af]',
-                              peITM && 'bg-[#EB5B3C]/6'
-                            )}>
-                              {row.peChngPct > 0 ? '+' : ''}{row.peChngPct.toFixed(1)}%
-                            </td>
-                            <td
-                              className={cn(
-                                'px-1.5 py-1 text-left font-mono font-tabular font-semibold text-[#1a1a1a] cursor-pointer hover:text-[#EB5B3C] hover:underline',
-                                peITM && 'bg-[#EB5B3C]/6'
-                              )}
-                              onClick={() => handleOptionClick(row, 'PE')}
-                            >
-                              {row.peLTP.toFixed(2)}
-                            </td>
-                            <td className={cn('px-1.5 py-1 text-left font-mono font-tabular text-[#9ca3af]', peITM && 'bg-[#EB5B3C]/6')}>
-                              {row.peVolume > 0 ? `${(row.peVolume / 1000).toFixed(0)}K` : '-'}
-                            </td>
-                            <td className={cn('px-1.5 py-1 text-left font-mono font-tabular text-[#6b7280]', peITM && 'bg-[#EB5B3C]/6')}>
-                              {row.peOI.toFixed(1)}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </TabsContent>
 
             {/* ═══ Statistics Tab ═══════════════════════════════════════════ */}
             <TabsContent value="stats" className="mt-4 space-y-4">
@@ -920,16 +557,6 @@ export function IndexDetailDrawer({ open, onOpenChange, symbol }: IndexDetailDra
           </Tabs>
         </div>
 
-        {/* Trade Modal for Option Chain */}
-        <OptionTradeModal
-          open={tradeModalOpen}
-          onOpenChange={setTradeModalOpen}
-          row={tradeRow}
-          side={tradeSide}
-          spotPrice={detail?.currentPrice ?? 0}
-          instrument={(symbol as 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY' | 'SENSEX' | 'MIDCPNIFTY') ?? 'NIFTY'}
-          lotSize={detail?.lotSize ?? 50}
-        />
 
         {/* Bottom Spacing */}
         <div className="h-20" />
@@ -938,217 +565,6 @@ export function IndexDetailDrawer({ open, onOpenChange, symbol }: IndexDetailDra
   )
 }
 
-// ─── Option Trade Modal ──────────────────────────────────────────────────
-
-function OptionTradeModal({
-  open,
-  onOpenChange,
-  row,
-  side,
-  spotPrice,
-  instrument,
-  lotSize,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  row: OptionRow | null
-  side: 'CE' | 'PE'
-  spotPrice: number
-  instrument: string
-  lotSize: number
-}) {
-  const { token } = useAuthStore()
-  const { showTradeSuccess } = useTradeSuccess()
-  const [lots, setLots] = useState(1)
-  const [direction, setDirection] = useState<'BUY' | 'SELL'>('BUY')
-  const [placing, setPlacing] = useState(false)
-
-  if (!row) return null
-
-  const ltp = side === 'CE' ? row.ceLTP : row.peLTP
-  const totalQty = lots * lotSize
-  const totalPremium = Math.round(ltp * totalQty * 100) / 100
-  const brokerage = Math.max(20, Math.min(500, Math.round(totalPremium * 0.0005 * 100) / 100))
-  const marginRequired = direction === 'BUY'
-    ? totalPremium + brokerage
-    : Math.round(totalPremium * 1.5 * 100) / 100
-
-  const handlePlaceOrder = async () => {
-    if (!token) {
-      toast.error('Please login to trade')
-      return
-    }
-    setPlacing(true)
-    try {
-      const res = await fetch('/api/trade/place', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          symbol: instrument,
-          direction,
-          orderType: 'MARKET',
-          segment: 'OPTIONS',
-          productType: 'INTRADAY',
-          quantity: totalQty,
-          lots,
-          optionType: side,
-          strikePrice: row.strike,
-          price: ltp,
-        }),
-      })
-      const data = await res.json()
-      if (res.ok && data.success) {
-        toast.success(data.message)
-        // Show trade success popup
-        const ltp = side === 'CE' ? row.ceLTP : row.peLTP
-        showTradeSuccess({
-          symbol: instrument,
-          type: direction,
-          qty: lots * lotSize,
-          price: ltp,
-          time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase(),
-          orderId: data.order?.id?.slice(-8).toUpperCase() || 'N/A',
-          segment: 'OPTIONS',
-          optionType: side,
-          strikePrice: row.strike,
-          totalValue: data.order?.totalValue,
-          brokerage: data.order?.brokerage,
-        })
-        onOpenChange(false)
-      } else {
-        toast.error(data.error || 'Failed to place order')
-      }
-    } catch {
-      toast.error('Network error')
-    } finally {
-      setPlacing(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <span className="text-[#00D09C] font-bold">
-              {side === 'CE' ? 'CALL' : 'PUT'} Option
-            </span>
-            <Badge variant="outline" className="font-mono">
-              Strike ₹{row.strike.toLocaleString()}
-            </Badge>
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 pt-2">
-          {/* Option Info */}
-          <div className="bg-[#ffffff] border border-[#e5e7eb] p-4 rounded-xl space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-[#6b7280]">Spot Price</span>
-              <span className="font-mono font-tabular font-semibold">₹{spotPrice.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-[#6b7280]">LTP</span>
-              <span className="font-mono font-tabular font-semibold">₹{ltp.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-[#6b7280]">IV</span>
-              <span className="font-mono font-tabular">{side === 'CE' ? row.ceIV : row.peIV}%</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-[#6b7280]">OI</span>
-              <span className="font-mono font-tabular">{(side === 'CE' ? row.ceOI : row.peOI).toFixed(1)} L</span>
-            </div>
-          </div>
-
-          {/* Buy/Sell Toggle */}
-          <div className="flex gap-2">
-            <Button
-              onClick={() => setDirection('BUY')}
-              className={cn(
-                'flex-1 font-bold',
-                direction === 'BUY' ? 'bg-[#00d09c] hover:bg-[#00b888] text-white' : 'bg-muted text-muted-foreground'
-              )}
-            >
-              BUY
-            </Button>
-            <Button
-              onClick={() => setDirection('SELL')}
-              className={cn(
-                'flex-1 font-bold',
-                direction === 'SELL' ? 'bg-[#eb5b3c] hover:bg-[#d44f33] text-white' : 'bg-muted text-muted-foreground'
-              )}
-            >
-              SELL
-            </Button>
-          </div>
-
-          {/* Lots Input */}
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-[#6b7280]">Lots</label>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" className="size-9" onClick={() => setLots(Math.max(1, lots - 1))}>
-                <Minus className="size-3" />
-              </Button>
-              <Input type="number" value={lots} onChange={(e) => setLots(Math.max(1, parseInt(e.target.value) || 1))} className="text-center font-mono" />
-              <Button variant="outline" size="icon" className="size-9" onClick={() => setLots(lots + 1)}>
-                <Plus className="size-3" />
-              </Button>
-            </div>
-          </div>
-
-          {/* Calculated Fields */}
-          <div className="bg-[#ffffff] border border-[#e5e7eb] p-4 rounded-xl space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-[#6b7280]">Lot Size</span>
-              <span className="font-mono font-tabular font-medium">{lotSize}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[#6b7280]">Total Qty</span>
-              <span className="font-mono font-tabular font-medium">{totalQty}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[#6b7280]">Premium</span>
-              <span className="font-mono font-tabular font-medium">₹{totalPremium.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[#6b7280]">Brokerage</span>
-              <span className="font-mono font-tabular font-medium">₹{brokerage.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between border-t border-[#e5e7eb]/20 pt-2">
-              <span className="text-[#6b7280] font-semibold">{direction === 'BUY' ? 'Total Cost' : 'Margin Required'}</span>
-              <span className="font-mono font-tabular font-bold text-[#00D09C] text-base">₹{marginRequired.toLocaleString()}</span>
-            </div>
-          </div>
-
-          <Button
-            onClick={handlePlaceOrder}
-            disabled={placing || ltp <= 0}
-            className={cn(
-              'w-full font-bold py-3',
-              direction === 'BUY'
-                ? 'bg-[#00d09c] hover:bg-[#00b888] text-white'
-                : 'bg-[#eb5b3c] hover:bg-[#d44f33] text-white'
-            )}
-          >
-            {placing ? (
-              <><Loader2 className="size-4 mr-2 animate-spin" />Placing Order...</>
-            ) : (
-              `Place ${direction} Order`
-            )}
-          </Button>
-
-          <p className="text-[10px] text-center text-[#6b7280] flex items-center justify-center gap-1">
-            <Info className="size-3" />
-            Paper trading — No real money involved
-          </p>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 // ─── Sub-Components ─────────────────────────────────────────────────────────
 

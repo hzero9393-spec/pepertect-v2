@@ -28,7 +28,7 @@ import {
   WifiOff,
 } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
-import { formatPrice, formatNumber, formatVolume } from '@/lib/format'
+import { formatPrice } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useIndexData, useStockData, useMarketDataStatus, type WsIndexQuote, type WsStockQuote } from '@/hooks/use-market-data'
@@ -45,38 +45,6 @@ interface IndexData {
   isEnabled: boolean
   isRealData?: boolean
   dataSource?: string
-}
-
-interface OptionChainItem {
-  strikePrice: number
-  expiryDate?: string
-  ce: {
-    ltp: number
-    change: number
-    changePercent: number
-    volume: number
-    openInterest: number
-    oiChange?: number
-    impliedVolatility: number
-  } | null
-  pe: {
-    ltp: number
-    change: number
-    changePercent: number
-    volume: number
-    openInterest: number
-    oiChange?: number
-    impliedVolatility: number
-  } | null
-}
-
-interface OptionChainData {
-  chain: OptionChainItem[]
-  spot: number
-  pcr: number
-  maxPain: number
-  isRealData: boolean
-  dataSource: string
 }
 
 interface StockData {
@@ -208,101 +176,6 @@ function StockRow({ stock, onClick }: { stock: StockData; onClick: () => void })
   )
 }
 
-// ─── Mini Option Chain Table ────────────────────────────────────────────────
-
-function MiniOptionChain({ data, spot }: { data: OptionChainData; spot: number }) {
-  if (!data.chain || data.chain.length === 0) {
-    return (
-      <div className="py-4 text-center">
-        <p className="text-[11px] text-[#6b7280]">Option chain data unavailable</p>
-      </div>
-    )
-  }
-
-  // Find ATM strike index
-  const spotPrice = spot || data.spot || 0
-  let atmIndex = 0
-  let minDiff = Infinity
-  data.chain.forEach((item, i) => {
-    const diff = Math.abs(item.strikePrice - spotPrice)
-    if (diff < minDiff) {
-      minDiff = diff
-      atmIndex = i
-    }
-  })
-
-  // Get 3 strikes above and 3 below ATM (total 7)
-  const startIdx = Math.max(0, atmIndex - 3)
-  const endIdx = Math.min(data.chain.length, atmIndex + 4)
-  const visibleChain = data.chain.slice(startIdx, endIdx)
-
-  return (
-    <div className="w-full">
-      {/* Header */}
-      <div className="grid grid-cols-5 gap-0 text-[9px] font-bold text-[#9ca3af] uppercase tracking-wider pb-1.5 border-b border-[#f0f0f0]">
-        <div className="text-center">CE OI</div>
-        <div className="text-center">CE LTP</div>
-        <div className="text-center bg-[#f8f8f8] font-extrabold text-[#6b7280]">Strike</div>
-        <div className="text-center">PE LTP</div>
-        <div className="text-center">PE OI</div>
-      </div>
-      {/* Rows */}
-      <div className="divide-y divide-[#f5f5f5]">
-        {visibleChain.map((item, i) => {
-          const isATM = Math.abs(item.strikePrice - spotPrice) === minDiff
-          const isITMCE = spotPrice > item.strikePrice
-          const isITMPE = spotPrice < item.strikePrice
-          return (
-            <div
-              key={`strike-${item.strikePrice}-${i}`}
-              className={cn(
-                'grid grid-cols-5 gap-0 py-1.5 text-[11px] font-mono transition-colors',
-                isATM && 'bg-[#00D09C]/5'
-              )}
-            >
-              {/* CE OI */}
-              <div className={cn(
-                'text-center font-medium',
-                isITMCE ? 'text-[#00B386]' : 'text-[#6b7280]'
-              )}>
-                {item.ce?.openInterest ? formatVolume(item.ce.openInterest) : '-'}
-              </div>
-              {/* CE LTP */}
-              <div className={cn(
-                'text-center font-semibold',
-                item.ce && item.ce.change >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'
-              )}>
-                {item.ce?.ltp ? item.ce.ltp.toFixed(1) : '-'}
-              </div>
-              {/* Strike */}
-              <div className={cn(
-                'text-center font-bold bg-[#f8f8f8]',
-                isATM ? 'text-[#00D09C]' : 'text-[#1a1a1a]'
-              )}>
-                {item.strikePrice}
-              </div>
-              {/* PE LTP */}
-              <div className={cn(
-                'text-center font-semibold',
-                item.pe && item.pe.change >= 0 ? 'text-[#00B386]' : 'text-[#EB5B3C]'
-              )}>
-                {item.pe?.ltp ? item.pe.ltp.toFixed(1) : '-'}
-              </div>
-              {/* PE OI */}
-              <div className={cn(
-                'text-center font-medium',
-                isITMPE ? 'text-[#EB5B3C]' : 'text-[#6b7280]'
-              )}>
-                {item.pe?.openInterest ? formatVolume(item.pe.openInterest) : '-'}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function DashboardPage() {
@@ -310,13 +183,11 @@ export function DashboardPage() {
 
   // Data states
   const [indices, setIndices] = useState<IndexData[]>([])
-  const [optionChains, setOptionChains] = useState<Record<string, OptionChainData>>({})
   const [apiGainers, setApiGainers] = useState<StockData[]>([])
   const [apiLosers, setApiLosers] = useState<StockData[]>([])
 
   // Loading states
   const [indicesLoading, setIndicesLoading] = useState(true)
-  const [chainLoading, setChainLoading] = useState<Record<string, boolean>>({})
   const [gainersLoading, setGainersLoading] = useState(true)
   const [losersLoading, setLosersLoading] = useState(true)
 
@@ -330,9 +201,6 @@ export function DashboardPage() {
   const [holidaysLoading, setHolidaysLoading] = useState(true)
   const [sectorsLoading, setSectorsLoading] = useState(true)
   const [holidaysOpen, setHolidaysOpen] = useState(false)
-
-  // Expanded option chains per index
-  const [expandedChains, setExpandedChains] = useState<Record<string, boolean>>({})
 
   // WebSocket real-time data
   const { indices: wsIndices, status: wsIndexStatus } = useIndexData()
@@ -355,23 +223,6 @@ export function DashboardPage() {
       }
     } catch { /* silent */ }
     finally { setIndicesLoading(false) }
-  }, [])
-
-  // ─── Fetch Option Chain for an index ─────────────────────────
-  const fetchOptionChain = useCallback(async (symbol: string) => {
-    setChainLoading(prev => ({ ...prev, [symbol]: true }))
-    try {
-      const res = await fetch(`/api/options/chain/${symbol}`)
-      if (res.ok) {
-        const json = await res.json()
-        if (json.success && json.data) {
-          setOptionChains(prev => ({ ...prev, [symbol]: json.data }))
-        }
-      }
-    } catch { /* silent */ }
-    finally {
-      setChainLoading(prev => ({ ...prev, [symbol]: false }))
-    }
   }, [])
 
   // ─── Fetch Gainers ───────────────────────────────────────────
@@ -451,7 +302,6 @@ export function DashboardPage() {
     setIsRefreshing(true)
     await Promise.allSettled([
       fetchIndices(),
-      ...TARGET_INDICES.map(s => fetchOptionChain(s)),
       fetchGainers(),
       fetchLosers(),
       fetchMarketStatus(),
@@ -460,7 +310,7 @@ export function DashboardPage() {
     ])
     setLastRefreshed(new Date())
     setIsRefreshing(false)
-  }, [fetchIndices, fetchOptionChain, fetchGainers, fetchLosers, fetchMarketStatus, fetchMarketBreadth, fetchSectors])
+  }, [fetchIndices, fetchGainers, fetchLosers, fetchMarketStatus, fetchMarketBreadth, fetchSectors])
 
   // ─── Merge WebSocket index data with REST data ────────────────────
   const mergedIndices = useMemo(() => {
@@ -538,7 +388,6 @@ export function DashboardPage() {
   // ─── Load all data ───────────────────────────────────────────
   useEffect(() => {
     fetchIndices()
-    TARGET_INDICES.forEach(s => fetchOptionChain(s))
     fetchGainers()
     fetchLosers()
     fetchMarketStatus()
@@ -559,9 +408,8 @@ export function DashboardPage() {
       fetchMarketBreadth()
       fetchSectors()
 
-      // Poll indices and option chains
+      // Poll indices
       fetchIndices()
-      TARGET_INDICES.forEach(s => fetchOptionChain(s))
 
       setLastRefreshed(new Date())
     }, pollInterval)
@@ -569,7 +417,7 @@ export function DashboardPage() {
     return () => {
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current)
     }
-  }, [fetchIndices, fetchOptionChain, fetchGainers, fetchLosers, fetchMarketStatus, fetchMarketBreadth, fetchHolidays, fetchSectors, isWsConnected])
+  }, [fetchIndices, fetchGainers, fetchLosers, fetchMarketStatus, fetchMarketBreadth, fetchHolidays, fetchSectors, isWsConnected])
 
   // ─── Listen for index detail events from ticker ────────────
   useEffect(() => {
@@ -586,21 +434,9 @@ export function DashboardPage() {
     mergedIndices.find(idx => idx.symbol === symbol)
   ).filter(Boolean) as IndexData[]
 
-  // Toggle option chain expansion
-  const toggleChain = (symbol: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setExpandedChains(prev => ({ ...prev, [symbol]: !prev[symbol] }))
-  }
-
   // ─── Index Card Component ──────────────────────────────────
   function IndexCard({ index }: { index: IndexData }) {
     const isPositive = index.changePercent >= 0
-    const chainData = optionChains[index.symbol]
-    const isLoading = chainLoading[index.symbol]
-    const spot = chainData?.spot || index.currentPrice
-    const pcr = chainData?.pcr
-    const maxPain = chainData?.maxPain
-    const isExpanded = expandedChains[index.symbol] ?? false
 
     return (
       <Card
@@ -614,12 +450,6 @@ export function DashboardPage() {
               <span className="text-[11px] font-semibold text-[#666] tracking-wider uppercase">
                 {index.name || index.symbol}
               </span>
-              {chainData?.isRealData && (
-                <span className="inline-flex items-center gap-1 text-[8px] font-bold text-[#00D09C] bg-[#00D09C]/8 border border-[#00D09C]/20 rounded px-1.5 py-0.5">
-                  <span className="size-1.5 rounded-full bg-[#00D09C] animate-pulse" />
-                  LIVE
-                </span>
-              )}
             </div>
             {isPositive ? (
               <TrendingUp className="size-4 text-[#00B386] opacity-60 group-hover:opacity-100 transition-opacity" />
@@ -646,93 +476,8 @@ export function DashboardPage() {
             </span>
           </div>
 
-          {/* Quick Stats: Spot / PCR / Max Pain */}
-          <div className="grid grid-cols-3 gap-2 py-2.5 border-t border-[#f0f0f0]">
-            <div>
-              <p className="text-[9px] font-bold text-[#9ca3af] tracking-wider uppercase">Spot</p>
-              <p className="text-[11px] font-bold font-mono text-[#1a1a1a]">
-                {spot > 0 ? formatPrice(spot) : '-'}
-              </p>
-            </div>
-            <div>
-              <p className="text-[9px] font-bold text-[#9ca3af] tracking-wider uppercase">PCR</p>
-              <p className={cn(
-                'text-[11px] font-bold font-mono',
-                pcr !== undefined && pcr > 1 ? 'text-[#00B386]' : pcr !== undefined && pcr < 1 ? 'text-[#EB5B3C]' : 'text-[#1a1a1a]'
-              )}>
-                {pcr !== undefined && pcr > 0 ? pcr.toFixed(2) : '-'}
-              </p>
-            </div>
-            <div>
-              <p className="text-[9px] font-bold text-[#9ca3af] tracking-wider uppercase">Max Pain</p>
-              <p className="text-[11px] font-bold font-mono text-[#1a1a1a]">
-                {maxPain && maxPain > 0 ? formatNumber(maxPain) : '-'}
-              </p>
-            </div>
-          </div>
-
-          {/* Expandable Option Chain Toggle */}
-          <button
-            onClick={(e) => toggleChain(index.symbol, e)}
-            className="flex items-center justify-between w-full py-2 border-t border-[#f0f0f0] text-left group/chain"
-          >
-            <span className="text-[10px] font-bold text-[#9ca3af] tracking-wider uppercase">
-              Option Chain
-            </span>
-            <div className="flex items-center gap-1">
-              {chainData?.dataSource && (
-                <span className="text-[9px] text-[#9ca3af]">
-                  {chainData.dataSource === 'upstox' ? '● Real-time' : chainData.dataSource === 'database' ? '● DB' : ''}
-                </span>
-              )}
-              {isExpanded ? (
-                <ChevronUp className="size-3.5 text-[#9ca3af] group-hover/chain:text-[#00D09C] transition-colors" />
-              ) : (
-                <ChevronDown className="size-3.5 text-[#9ca3af] group-hover/chain:text-[#00D09C] transition-colors" />
-              )}
-            </div>
-          </button>
-
-          {/* Expandable Option Chain Table */}
-          <AnimatePresence>
-            {isExpanded && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2, ease: 'easeInOut' }}
-                className="overflow-hidden"
-              >
-                <div className="pt-1 pb-1">
-                  {isLoading ? (
-                    <div className="space-y-2">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="grid grid-cols-5 gap-2">
-                          <Skeleton className="h-3 bg-[#f5f7fa]" />
-                          <Skeleton className="h-3 bg-[#f5f7fa]" />
-                          <Skeleton className="h-3 bg-[#f5f7fa]" />
-                          <Skeleton className="h-3 bg-[#f5f7fa]" />
-                          <Skeleton className="h-3 bg-[#f5f7fa]" />
-                        </div>
-                      ))}
-                    </div>
-                  ) : chainData ? (
-                    <MiniOptionChain data={chainData} spot={spot} />
-                  ) : (
-                    <div className="py-3 text-center">
-                      <p className="text-[11px] text-[#9ca3af]">Chain data unavailable</p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
           {/* View Details Footer */}
-          <div className="flex items-center justify-between pt-2 border-t border-[#f0f0f0]">
-            <span className="text-[10px] text-[#9ca3af]">
-              {chainData?.dataSource === 'upstox' ? '● Live' : chainData?.dataSource === 'database' ? '● DB' : ''}
-            </span>
+          <div className="flex items-center justify-end pt-2 border-t border-[#f0f0f0]">
             <span className="text-[10px] font-semibold text-[#00D09C] flex items-center gap-1 group-hover:gap-2 transition-all">
               View Details <ChevronRight className="size-3" />
             </span>
@@ -753,12 +498,7 @@ export function DashboardPage() {
           </div>
           <Skeleton className="h-8 w-32 mb-1.5 bg-[#f5f7fa]" />
           <Skeleton className="h-4 w-28 mb-3 bg-[#f5f7fa]" />
-          <div className="grid grid-cols-3 gap-2 py-2.5 border-t border-[#f0f0f0]">
-            <Skeleton className="h-6 bg-[#f5f7fa]" />
-            <Skeleton className="h-6 bg-[#f5f7fa]" />
-            <Skeleton className="h-6 bg-[#f5f7fa]" />
-          </div>
-          <div className="py-2 border-t border-[#f0f0f0]">
+          <div className="flex items-center justify-end pt-2 border-t border-[#f0f0f0]">
             <Skeleton className="h-3 w-20 bg-[#f5f7fa]" />
           </div>
         </CardContent>
