@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get fresh user data
-    const user = await db.user.findUnique({
+    let user = await db.user.findUnique({
       where: { id: payload.userId },
       include: {
         _count: {
@@ -49,6 +49,20 @@ export async function GET(request: NextRequest) {
         { error: 'User not found or deactivated' },
         { status: 401 }
       )
+    }
+
+    // Sync marginUsed from actual open SELL positions to prevent stale data
+    const realMargin = await db.position.aggregate({
+      where: { userId: payload.userId, isOpen: true, tradeDirection: 'SELL' },
+      _sum: { marginUsed: true },
+    })
+    const realMarginUsed = realMargin._sum.marginUsed || 0
+    if (realMarginUsed !== (user.marginUsed || 0)) {
+      user = await db.user.update({
+        where: { id: payload.userId },
+        data: { marginUsed: realMarginUsed },
+        include: user.include,
+      })
     }
 
     const { passwordHash: _, ...userWithoutPassword } = user
