@@ -11,7 +11,7 @@ import {
   ArrowDownRight,
   ArrowLeft,
   BarChart3,
-  ArrowRight,
+  CandlestickChart,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatINR, formatNumber } from '@/lib/format'
@@ -55,21 +55,6 @@ interface CandleData {
   close: number
   volume: number
 }
-
-interface OptionSideData {
-  ltp: number
-  change: number
-  changePercent: number
-  volume: number
-  openInterest: number
-  oiChange: number
-  impliedVolatility: number
-  delta?: number
-  gamma?: number
-  theta?: number
-  vega?: number
-}
-
 
 type RangeOption = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y' | '5Y'
 

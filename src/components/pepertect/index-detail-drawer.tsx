@@ -18,6 +18,7 @@ import {
   ArrowDownRight,
   X,
   BarChart3,
+  CandlestickChart,
   Activity,
   Info,
   Clock,
