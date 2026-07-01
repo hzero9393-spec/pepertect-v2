@@ -89,7 +89,11 @@ export function OptionChainPage() {
       .then(r => r.json())
       .then(json => {
         if (cancelled) return
-        const list: string[] = json?.data?.expiries || []
+        const all: string[] = json?.data?.expiries || []
+        // Rolling window: only next 4 upcoming expiries
+        const today = new Date().toISOString().split('T')[0]
+        const upcoming = all.filter(e => e >= today)
+        const list = upcoming.slice(0, 4)
         setExpiries(list)
         if (list.length > 0) setExpiry(list[0])
       })
