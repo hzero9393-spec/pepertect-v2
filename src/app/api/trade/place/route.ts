@@ -591,6 +591,8 @@ export async function POST(request: NextRequest) {
       const lots = body.lots || 1
       const optionType = body.optionType
       const strikePrice = body.strikePrice
+      const requestExpiry = body.expiryDate ? new Date(body.expiryDate) : null
+      const requestLtp = body.ltp || null // LTP from live option chain
 
       if (!optionType || !['CE', 'PE'].includes(optionType)) {
         return NextResponse.json({ error: 'optionType is required and must be CE or PE' }, { status: 400 })
@@ -599,7 +601,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'strikePrice is required and must be positive' }, { status: 400 })
       }
 
-      // Try cache first
+      // Try cache first, then DB lookup
       let option = cache.get<{ ltp: number; id: string; expiryDate: Date } & Record<string, unknown>>(
         CacheKeys.optionPrice(symbol, optionType, strikePrice)
       ) as (Record<string, unknown> & { ltp: number; id: string; expiryDate: Date }) | null
@@ -611,6 +613,7 @@ export async function POST(request: NextRequest) {
             optionType: optionType as 'CE' | 'PE',
             strikePrice,
             isActive: true,
+            ...(requestExpiry ? { expiryDate: requestExpiry } : {}),
           },
           orderBy: { expiryDate: 'asc' },
         }) as (Record<string, unknown> & { ltp: number; id: string; expiryDate: Date }) | null
@@ -620,16 +623,26 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // For index options from live option chain, use request data if DB lookup fails
+      const isLiveOption = !option && requestLtp && requestExpiry
+      if (isLiveOption) {
+        option = {
+          id: `live-${symbol}-${strikePrice}-${optionType}-${body.expiryDate}`,
+          ltp: requestLtp,
+          expiryDate: requestExpiry,
+        } as unknown as typeof option
+      }
+
       if (!option) {
         return NextResponse.json({
-          error: `Option not found: ${symbol} ${strikePrice} ${optionType}`
+          error: `Option not found: ${symbol} ${strikePrice} ${optionType}. Provide ltp and expiryDate for live options.`
         }, { status: 404 })
       }
 
       const indexData = await db.index.findFirst({
         where: { symbol },
       })
-      const lotSize = indexData?.lotSize || 50
+      const lotSize = body.lotSize || indexData?.lotSize || 50
 
       const fillPrice = orderType === 'MARKET' ? option.ltp : (price || option.ltp)
       const totalQty = lots * lotSize
