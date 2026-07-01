@@ -1,25 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { formatNumber, formatINR } from '@/lib/format'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import {
-  ArrowUpRight,
-  ArrowDownRight,
-  RefreshCw,
-  Radio,
-  Wifi,
-  WifiOff,
-  Activity,
-} from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface OCStrike {
   strike_price: number
-  pcr: number
   underlying_spot_price: number
   call_options: {
     market_data: {
@@ -51,375 +38,312 @@ interface OCUpdate {
 
 type Underlying = 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY' | 'SENSEX'
 
-const INDEX_INFO: Record<Underlying, { name: string; color: string; lotSize: number }> = {
-  NIFTY: { name: 'NIFTY 50', color: '#00B386', lotSize: 50 },
-  BANKNIFTY: { name: 'BANK NIFTY', color: '#6366F1', lotSize: 25 },
-  FINNIFTY: { name: 'FINNIFTY', color: '#F59E0B', lotSize: 40 },
-  SENSEX: { name: 'SENSEX', color: '#EF4444', lotSize: 15 },
-}
+const INDICES: { key: Underlying; label: string }[] = [
+  { key: 'NIFTY', label: 'NIFTY 50' },
+  { key: 'BANKNIFTY', label: 'BANKNIFTY' },
+  { key: 'FINNIFTY', label: 'FINNIFTY' },
+  { key: 'SENSEX', label: 'SENSEX' },
+]
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function formatExpiry(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00+05:30')
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
+function fmtExpiry(d: string) {
+  const dt = new Date(d + 'T00:00:00+05:30')
+  return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
 }
 
-function formatVolume(n: number): string {
-  if (n >= 10000000) return (n / 10000000).toFixed(1) + 'Cr'
-  if (n >= 100000) return (n / 100000).toFixed(1) + 'L'
+function fmtNum(n: number): string {
+  if (n >= 10000000) return (n / 10000000).toFixed(2) + ' Cr'
+  if (n >= 100000) return (n / 100000).toFixed(2) + ' L'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-  return n.toString()
+  return String(n)
 }
 
-// ─── Summary Cards ──────────────────────────────────────────────────────────
-
-function SummaryCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
-  return (
-    <div className="bg-white border border-[#e5e7eb] rounded-xl p-3 sm:p-4 min-w-[120px]">
-      <p className="text-[10px] sm:text-xs font-semibold text-[#6b7280] tracking-wider uppercase mb-1">{label}</p>
-      <p className="text-base sm:text-lg font-bold font-mono font-tabular" style={{ color: color || '#1a1a1a' }}>
-        {value}
-      </p>
-      {sub && <p className="text-[10px] text-[#9ca3af] mt-0.5">{sub}</p>}
-    </div>
-  )
+function fmtLtp(n: number): string {
+  if (n <= 0) return '-'
+  if (n < 10) return n.toFixed(2)
+  return n.toFixed(1)
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function OptionChainPage() {
-  const [selectedUnderlying, setSelectedUnderlying] = useState<Underlying>('NIFTY')
+  const [index, setIndex] = useState<Underlying>('NIFTY')
   const [expiries, setExpiries] = useState<string[]>([])
-  const [selectedExpiry, setSelectedExpiry] = useState<string>('')
+  const [expiry, setExpiry] = useState('')
   const [data, setData] = useState<OCUpdate | null>(null)
-  const [connected, setConnected] = useState(false)
-  const [lastUpdate, setLastUpdate] = useState<number>(0)
+  const [live, setLive] = useState(false)
   const [loading, setLoading] = useState(true)
   const esRef = useRef<EventSource | null>(null)
   const tableRef = useRef<HTMLDivElement>(null)
-  const [atmRowId, setAtmRowId] = useState<string>('')
+  const scrolledOnce = useRef(false)
 
-  // Fetch expiries when underlying changes
+  // Fetch expiries
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setData(null)
+    setExpiry('')
 
-    fetch(`/api/options/expiries/${selectedUnderlying}`)
+    fetch(`/api/options/expiries/${index}`)
       .then(r => r.json())
       .then(json => {
         if (cancelled) return
-        const exps: string[] = json?.data?.expiries || []
-        setExpiries(exps)
-        if (exps.length > 0) {
-          setSelectedExpiry(exps[0])
-        }
+        const list: string[] = json?.data?.expiries || []
+        setExpiries(list)
+        if (list.length > 0) setExpiry(list[0])
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false) })
 
     return () => { cancelled = true }
-  }, [selectedUnderlying])
+  }, [index])
 
-  // Connect to SSE stream
+  // SSE stream
   useEffect(() => {
-    if (!selectedExpiry) return
-
-    // Close existing connection
+    if (!expiry) return
     esRef.current?.close()
 
-    const es = new EventSource(`/api/options/stream?underlying=${selectedUnderlying}&expiry=${encodeURIComponent(selectedExpiry)}`)
+    const es = new EventSource(`/api/options/stream?underlying=${index}&expiry=${encodeURIComponent(expiry)}`)
     esRef.current = es
 
-    es.onopen = () => setConnected(true)
-
+    es.onopen = () => setLive(true)
     es.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data)
-        if (msg.type === 'update' && msg.data) {
-          setData(msg.data)
-          setLastUpdate(Date.now())
-        }
-      } catch { /* ignore */ }
+        if (msg.type === 'update' && msg.data) setData(msg.data)
+      } catch { /* */ }
     }
+    es.onerror = () => { setLive(false); es.close() }
 
-    es.onerror = () => {
-      setConnected(false)
-      es.close()
-    }
+    return () => { es.close(); esRef.current = null; setLive(false) }
+  }, [index, expiry])
 
-    return () => {
-      es.close()
-      esRef.current = null
-      setConnected(false)
-    }
-  }, [selectedUnderlying, selectedExpiry])
-
-  // Scroll to ATM on first data load
+  // Auto-scroll to ATM once
   useEffect(() => {
-    if (data && tableRef.current) {
-      const atmEl = tableRef.current.querySelector('[data-atm="true"]')
-      if (atmEl) {
-        atmEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }
+    if (data && tableRef.current && !scrolledOnce.current) {
+      const el = tableRef.current.querySelector('[data-atm="true"]')
+      if (el) { el.scrollIntoView({ block: 'center' }); scrolledOnce.current = true }
     }
   }, [data?.strikes?.length])
 
-  // Filtered strikes around ATM (±20 strikes)
-  const displayStrikes = useMemo(() => {
+  // Reset scroll on index/expiry change
+  useEffect(() => { scrolledOnce.current = false }, [index, expiry])
+
+  // Filter strikes around spot
+  const strikes = useMemo(() => {
     if (!data?.strikes?.length) return []
     const spot = data.spot
+    // Show all strikes within range
     return data.strikes.filter(s => Math.abs(s.strike_price - spot) <= 2000)
   }, [data?.strikes, data?.spot])
 
-  // Find ATM strike
-  const atmStrike = useMemo(() => {
+  // ATM strike
+  const atm = useMemo(() => {
     if (!data?.strikes?.length || !data.spot) return 0
-    let closest = data.strikes[0].strike_price
-    let minDiff = Math.abs(data.strikes[0].strike_price - data.spot)
+    let best = data.strikes[0].strike_price
+    let minD = Math.abs(best - data.spot)
     for (const s of data.strikes) {
-      const diff = Math.abs(s.strike_price - data.spot)
-      if (diff < minDiff) { minDiff = diff; closest = s.strike_price }
+      const d = Math.abs(s.strike_price - data.spot)
+      if (d < minD) { minD = d; best = s.strike_price }
     }
-    return closest
+    return best
   }, [data?.strikes, data?.spot])
 
-  const info = INDEX_INFO[selectedUnderlying]
-  const spotChange = data ? data.spot - (data.strikes[0]?.underlying_spot_price || data.spot) : 0
-
   return (
-    <div className="min-h-screen bg-[#fafafa]">
-      {/* ═══ Header ═════════════════════════════════════════════════════════ */}
-      <div className="sticky top-14 md:top-14 z-20 bg-white border-b border-[#e5e7eb]">
-        <div className="px-4 sm:px-6 lg:px-8 py-3">
-          {/* Top row: Title + connection status */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-xl" style={{ background: `${info.color}15` }}>
-                <Activity className="size-4" style={{ color: info.color }} />
-              </div>
-              <div>
-                <h1 className="text-base sm:text-lg font-bold text-[#1a1a1a]">Option Chain</h1>
-                <div className="flex items-center gap-2">
-                  {connected ? (
-                    <span className="flex items-center gap-1 text-[10px] font-semibold text-[#00B386]">
-                      <Radio className="size-3 animate-pulse" /> LIVE 1s
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1 text-[10px] text-[#9ca3af]">
-                      <WifiOff className="size-3" /> Connecting...
-                    </span>
-                  )}
-                  {lastUpdate > 0 && (
-                    <span className="text-[10px] text-[#9ca3af]">
-                      Updated {new Date(lastUpdate).toLocaleTimeString('en-IN')}
-                    </span>
-                  )}
-                </div>
-              </div>
+    <div className="min-h-screen bg-[#f8f9fa] flex flex-col">
+      {/* ── Top Bar ── */}
+      <div className="sticky top-14 z-20 bg-white border-b border-[#e0e0e0]">
+        <div className="max-w-7xl mx-auto px-3 py-2.5">
+          {/* Index Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar mb-2">
+            {INDICES.map(ind => (
+              <button
+                key={ind.key}
+                onClick={() => setIndex(ind.key)}
+                className={cn(
+                  'px-4 py-1.5 rounded text-sm font-semibold transition-colors whitespace-nowrap',
+                  index === ind.key
+                    ? 'bg-[#0d6efd] text-white'
+                    : 'text-[#555] hover:bg-[#eee]'
+                )}
+              >
+                {ind.label}
+              </button>
+            ))}
+
+            {/* Live indicator */}
+            <div className="ml-auto flex items-center gap-2 shrink-0">
+              {live && (
+                <span className="flex items-center gap-1 text-[11px] text-[#0d6efd] font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#0d6efd] animate-pulse" />
+                  LIVE
+                </span>
+              )}
             </div>
-
-            {/* Spot Price */}
-            {data && (
-              <div className="text-right">
-                <p className="text-xl font-bold font-mono font-tabular text-[#1a1a1a]">
-                  {data.spot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-                <p className={cn('text-xs font-semibold', data.pcr > 1 ? 'text-[#00B386]' : 'text-[#EB5B3C]')}>
-                  {data.pcr > 0 ? `PCR: ${data.pcr.toFixed(2)}` : 'PCR: --'}
-                </p>
-              </div>
-            )}
           </div>
 
-          {/* Index Selector */}
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-            {(Object.keys(INDEX_INFO) as Underlying[]).map((key) => {
-              const i = INDEX_INFO[key]
-              const active = selectedUnderlying === key
-              return (
+          {/* Expiry + Spot row */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+              {expiries.map(e => (
                 <button
-                  key={key}
-                  onClick={() => setSelectedUnderlying(key)}
+                  key={e}
+                  onClick={() => setExpiry(e)}
                   className={cn(
-                    'px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap border',
-                    active
-                      ? 'text-white border-transparent shadow-sm'
-                      : 'text-[#4b5563] border-[#e5e7eb] hover:bg-[#f5f5f5]'
-                  )}
-                  style={active ? { background: i.color } : {}}
-                >
-                  {i.name}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Expiry Selector */}
-          {expiries.length > 0 && (
-            <div className="flex items-center gap-2 mt-2 overflow-x-auto no-scrollbar">
-              <span className="text-[10px] font-semibold text-[#9ca3af] shrink-0">EXPIRY:</span>
-              {expiries.map((exp) => (
-                <button
-                  key={exp}
-                  onClick={() => setSelectedExpiry(exp)}
-                  className={cn(
-                    'px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all whitespace-nowrap',
-                    selectedExpiry === exp
-                      ? 'bg-[#1a1a1a] text-white'
-                      : 'text-[#6b7280] hover:bg-[#f5f5f5]'
+                    'px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap',
+                    expiry === e ? 'bg-[#0d6efd] text-white' : 'text-[#666] hover:bg-[#eee]'
                   )}
                 >
-                  {formatExpiry(exp)}
+                  {fmtExpiry(e)}
                 </button>
               ))}
             </div>
-          )}
+
+            {data && (
+              <div className="ml-auto flex items-center gap-4 text-xs shrink-0">
+                <span>
+                  <span className="text-[#888]">Spot: </span>
+                  <span className="font-bold text-[#111]">{data.spot.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                </span>
+                <span>
+                  <span className="text-[#888]">PCR: </span>
+                  <span className={cn('font-bold', data.pcr > 1 ? 'text-green-600' : 'text-red-500')}>
+                    {data.pcr > 0 ? data.pcr.toFixed(2) : '-'}
+                  </span>
+                </span>
+                <span>
+                  <span className="text-[#888]">Max Pain: </span>
+                  <span className="font-bold text-[#111]">{data.maxPainStrike > 0 ? data.maxPainStrike.toLocaleString('en-IN') : '-'}</span>
+                </span>
+                <span>
+                  <span className="text-[#888]">CE OI: </span>
+                  <span className="font-bold text-green-600">{fmtNum(data.totalCallOI)}</span>
+                </span>
+                <span>
+                  <span className="text-[#888]">PE OI: </span>
+                  <span className="font-bold text-red-500">{fmtNum(data.totalPutOI)}</span>
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ═══ Summary Cards ═══════════════════════════════════════════════════ */}
-      {data && (
-        <div className="px-4 sm:px-6 lg:px-8 py-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-            <SummaryCard label="Spot Price" value={formatINR(data.spot)} color={info.color} />
-            <SummaryCard label="PCR" value={data.pcr > 0 ? data.pcr.toFixed(2) : '--'} color={data.pcr > 1 ? '#00B386' : '#EB5B3C'} sub={data.pcr > 1 ? 'Bullish' : 'Bearish'} />
-            <SummaryCard label="Total Call OI" value={formatVolume(data.totalCallOI)} sub={`${info.lotSize} lot size`} />
-            <SummaryCard label="Total Put OI" value={formatVolume(data.totalPutOI)} />
-            <SummaryCard label="Max Pain" value={data.maxPainStrike > 0 ? formatINR(data.maxPainStrike) : '--'} color="#F59E0B" />
-            <SummaryCard label="ATM Strike" value={atmStrike.toLocaleString('en-IN')} />
-          </div>
-        </div>
-      )}
-
-      {/* ═══ Option Chain Table ═══════════════════════════════════════════════ */}
-      <div className="px-2 sm:px-4 lg:px-6 pb-20" ref={tableRef}>
+      {/* ── Table ── */}
+      <div className="flex-1 px-2 sm:px-4 py-3 pb-20" ref={tableRef}>
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="flex flex-col items-center gap-3">
-              <div className="flex gap-1.5">
-                <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="size-2 rounded-full bg-[#00D09C] animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-              <span className="text-xs text-[#6b7280]">Loading option chain...</span>
-            </div>
+          <div className="flex items-center justify-center py-20 text-sm text-[#888]">
+            Loading option chain...
           </div>
-        ) : displayStrikes.length > 0 ? (
-          <div className="bg-white border border-[#e5e7eb] rounded-xl overflow-hidden">
-            {/* Table Header */}
-            <div className="grid grid-cols-[1fr_auto_1fr] text-[10px] font-bold uppercase tracking-wider border-b border-[#e5e7eb] bg-[#f9fafb]">
-              {/* CE Header */}
-              <div className="grid grid-cols-4 px-2 py-2.5 text-[#6b7280] border-r border-[#e5e7eb]">
-                <span className="text-center">OI Chg</span>
-                <span className="text-center">OI</span>
-                <span className="text-center">Vol</span>
-                <span className="text-center">IV</span>
-                <span className="text-center">LTP</span>
-                <span className="text-center">Chg</span>
+        ) : strikes.length > 0 ? (
+          <div className="bg-white border border-[#ddd] rounded overflow-hidden">
+            {/* Header */}
+            <div className="grid grid-cols-[1fr_72px_1fr] text-[11px] font-semibold uppercase tracking-wide border-b-2 border-[#ddd] bg-[#f5f5f5]">
+              <div className="grid grid-cols-5 text-center text-[#666] border-r border-[#ddd]">
+                <span>OI Chg</span>
+                <span>OI</span>
+                <span>Volume</span>
+                <span>IV</span>
+                <span>LTP</span>
               </div>
-              {/* Strike Header */}
-              <div className="px-3 py-2.5 text-center text-[#1a1a1a] font-bold bg-[#f9fafb] min-w-[80px]">
+              <div className="flex items-center justify-center text-[#333] font-bold text-xs">
                 STRIKE
               </div>
-              {/* PE Header */}
-              <div className="grid grid-cols-6 px-2 py-2.5 text-[#6b7280]">
-                <span className="text-center">Chg</span>
-                <span className="text-center">LTP</span>
-                <span className="text-center">IV</span>
-                <span className="text-center">Vol</span>
-                <span className="text-center">OI</span>
-                <span className="text-center">OI Chg</span>
+              <div className="grid grid-cols-5 text-center text-[#666]">
+                <span>LTP</span>
+                <span>IV</span>
+                <span>Volume</span>
+                <span>OI</span>
+                <span>OI Chg</span>
               </div>
+            </div>
+
+            {/* CE label */}
+            <div className="grid grid-cols-[1fr_72px_1fr] text-[10px] font-bold border-b border-[#eee] bg-[#e8f5e9]">
+              <div className="text-center text-green-700 py-1 border-r border-[#ddd]">CALLS (CE)</div>
+              <div />
+              <div className="text-center text-red-700 py-1 bg-[#fce4ec]">PUTS (PE)</div>
             </div>
 
             {/* Rows */}
-            <div className="max-h-[65vh] overflow-y-auto">
-              {displayStrikes.map((strike) => {
-                const ce = strike.call_options.market_data
-                const pe = strike.put_options.market_data
-                const ceGreeks = strike.call_options.option_greeks
-                const peGreeks = strike.put_options.option_greeks
-                const isATM = strike.strike_price === atmStrike
-                const isITMCall = strike.strike_price < data!.spot
-                const isITMPut = strike.strike_price > data!.spot
-                const ceChg = ce.close_price > 0 ? ce.ltp - ce.close_price : 0
-                const peChg = pe.close_price > 0 ? pe.ltp - pe.close_price : 0
-                const ceOIChg = ce.oi - ce.prev_oi
-                const peOIChg = pe.oi - pe.prev_oi
+            <div className="max-h-[calc(100vh-220px)] overflow-y-auto">
+              {strikes.map(s => {
+                const ce = s.call_options.market_data
+                const pe = s.put_options.market_data
+                const ceIV = s.call_options.option_greeks?.iv || 0
+                const peIV = s.put_options.option_greeks?.iv || 0
+                const isATM = s.strike_price === atm
+                const ceITM = s.strike_price < data!.spot
+                const peITM = s.strike_price > data!.spot
+                const ceOIChg = ce.oi - (ce.prev_oi || 0)
+                const peOIChg = pe.oi - (pe.prev_oi || 0)
 
                 return (
                   <div
-                    key={strike.strike_price}
+                    key={s.strike_price}
                     data-atm={isATM ? 'true' : undefined}
-                    id={`strike-${strike.strike_price}`}
                     className={cn(
-                      'grid grid-cols-[1fr_auto_1fr] text-[11px] sm:text-xs font-mono font-tabular border-b border-[#f3f4f6] hover:bg-[#f9fafb]/80 transition-colors',
-                      isATM && 'bg-[#00D09C]/5 border-y border-[#00D09C]/20',
+                      'grid grid-cols-[1fr_72px_1fr] text-[11px] font-mono border-b border-[#f0f0f0] hover:bg-[#fafafa]',
+                      isATM && 'bg-[#e3f2fd] border-y border-[#90caf9]'
                     )}
                   >
                     {/* CE Side */}
                     <div className={cn(
-                      'grid grid-cols-6 px-2 py-1.5 items-center border-r border-[#e5e7eb]',
-                      isITMCall && 'bg-[#00B386]/[0.03]'
+                      'grid grid-cols-5 items-center border-r border-[#ddd]',
+                      ceITM && !isATM && 'bg-[#f1f8e9]'
                     )}>
-                      <OIBadge value={ceOIChg} className="text-center" />
-                      <span className="text-center text-[#1a1a1a]">{formatVolume(ce.oi)}</span>
-                      <span className="text-center text-[#4b5563]">{formatVolume(ce.volume)}</span>
-                      <span className="text-center text-[#6b7280]">{ceGreeks.iv > 0 ? ceGreeks.iv.toFixed(1) : '-'}</span>
-                      <span className="text-center font-semibold text-[#1a1a1a]">{ce.ltp > 0 ? ce.ltp.toFixed(1) : '-'}</span>
-                      <ChangeBadge value={ceChg} className="text-center" />
+                      <Cell val={ceOIChg} fmt="oiChg" />
+                      <Cell val={ce.oi} fmt="num" />
+                      <Cell val={ce.volume} fmt="num" />
+                      <span className="text-center text-[#777]">{ceIV > 0 ? ceIV.toFixed(1) : '-'}</span>
+                      <Cell val={ce.ltp} fmt="ltp" />
                     </div>
 
                     {/* Strike */}
                     <div className={cn(
-                      'px-2 sm:px-3 py-1.5 text-center font-bold text-sm border-r border-[#e5e7eb]',
-                      isATM ? 'text-[#00A67E] bg-[#00D09C]/10' : 'text-[#1a1a1a]'
+                      'flex items-center justify-center font-bold text-xs py-1.5 border-r border-[#ddd]',
+                      isATM ? 'text-[#1565c0] bg-[#e3f2fd]' : 'text-[#222]'
                     )}>
-                      {strike.strike_price.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                      {isATM && <div className="text-[8px] font-bold text-[#00D09C]">ATM</div>}
+                      {s.strike_price.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </div>
 
                     {/* PE Side */}
                     <div className={cn(
-                      'grid grid-cols-6 px-2 py-1.5 items-center',
-                      isITMPut && 'bg-[#EB5B3C]/[0.03]'
+                      'grid grid-cols-5 items-center',
+                      peITM && !isATM && 'bg-[#fce4ec]'
                     )}>
-                      <ChangeBadge value={peChg} className="text-center" />
-                      <span className="text-center font-semibold text-[#1a1a1a]">{pe.ltp > 0 ? pe.ltp.toFixed(1) : '-'}</span>
-                      <span className="text-center text-[#6b7280]">{peGreeks.iv > 0 ? peGreeks.iv.toFixed(1) : '-'}</span>
-                      <span className="text-center text-[#4b5563]">{formatVolume(pe.volume)}</span>
-                      <span className="text-center text-[#1a1a1a]">{formatVolume(pe.oi)}</span>
-                      <OIBadge value={peOIChg} className="text-center" />
+                      <Cell val={pe.ltp} fmt="ltp" />
+                      <span className="text-center text-[#777]">{peIV > 0 ? peIV.toFixed(1) : '-'}</span>
+                      <Cell val={pe.volume} fmt="num" />
+                      <Cell val={pe.oi} fmt="num" />
+                      <Cell val={peOIChg} fmt="oiChg" />
                     </div>
                   </div>
                 )
               })}
             </div>
 
-            {/* Table Footer */}
-            <div className="grid grid-cols-[1fr_auto_1fr] text-[10px] font-bold border-t-2 border-[#e5e7eb] bg-[#f9fafb]">
-              <div className="grid grid-cols-6 px-2 py-2 border-r border-[#e5e7eb] text-[#00B386]">
-                <span /> {/* OI Chg */}
-                <span className="text-center">{formatVolume(data?.totalCallOI || 0)}</span>
-                <span className="text-center font-semibold text-[#6b7280]">CALLS</span>
-                <span /><span /><span />
+            {/* Total Row */}
+            <div className="grid grid-cols-[1fr_72px_1fr] text-[11px] font-bold border-t-2 border-[#ddd] bg-[#f5f5f5]">
+              <div className="grid grid-cols-5 items-center border-r border-[#ddd]">
+                <span />
+                <span className="text-center text-green-700">{fmtNum(data?.totalCallOI || 0)}</span>
+                <span className="text-center text-[#666]">Total CE OI</span>
+                <span /><span />
               </div>
-              <div className="px-3 py-2 text-center text-[#1a1a1a] font-bold text-[10px]">
-                TOTAL
-              </div>
-              <div className="grid grid-cols-6 px-2 py-2 text-[#EB5B3C]">
-                <span /><span /><span />
-                <span className="text-center font-semibold text-[#6b7280]">PUTS</span>
-                <span className="text-center">{formatVolume(data?.totalPutOI || 0)}</span>
+              <div />
+              <div className="grid grid-cols-5 items-center">
+                <span /><span />
+                <span className="text-center text-[#666]">Total PE OI</span>
+                <span className="text-center text-red-600">{fmtNum(data?.totalPutOI || 0)}</span>
                 <span />
               </div>
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center py-20 text-[#6b7280] text-sm">
-            {connected ? 'No option chain data available for this expiry' : 'Connecting to live data...'}
+          <div className="flex items-center justify-center py-20 text-sm text-[#888]">
+            {live ? 'No data for this expiry' : 'Connecting...'}
           </div>
         )}
       </div>
@@ -427,24 +351,30 @@ export function OptionChainPage() {
   )
 }
 
-// ─── Small Components ───────────────────────────────────────────────────────
+// ─── Cell Renderer ──────────────────────────────────────────────────────────
 
-function ChangeBadge({ value, className }: { value: number; className?: string }) {
-  if (value === 0) return <span className={className}>-</span>
-  const isUp = value > 0
-  return (
-    <span className={cn(className, 'font-semibold', isUp ? 'text-[#00B386]' : 'text-[#EB5B3C]')}>
-      {isUp ? '+' : ''}{value.toFixed(1)}
-    </span>
-  )
-}
+function Cell({ val, fmt }: { val: number; fmt: 'ltp' | 'num' | 'oiChg' }) {
+  if (fmt === 'ltp') {
+    return (
+      <span className={cn(
+        'text-center font-semibold',
+        val > 0 ? 'text-[#111]' : 'text-[#bbb]'
+      )}>
+        {fmtLtp(val)}
+      </span>
+    )
+  }
 
-function OIBadge({ value, className }: { value: number; className?: string }) {
-  if (value === 0) return <span className={className}>-</span>
-  const isUp = value > 0
+  if (fmt === 'num') {
+    return <span className="text-center text-[#333]">{val > 0 ? fmtNum(val) : '-'}</span>
+  }
+
+  // oiChg
+  if (val === 0) return <span className="text-center text-[#ccc]">-</span>
+  const up = val > 0
   return (
-    <span className={cn(className, isUp ? 'text-[#00B386]' : 'text-[#EB5B3C]')}>
-      {isUp ? '+' : ''}{formatVolume(Math.abs(value))}
+    <span className={cn('text-center', up ? 'text-green-600' : 'text-red-500')}>
+      {up ? '+' : ''}{fmtNum(Math.abs(val))}
     </span>
   )
 }
