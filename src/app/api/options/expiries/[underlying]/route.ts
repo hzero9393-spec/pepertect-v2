@@ -12,10 +12,13 @@ export async function GET(
     const { underlying } = await params
     const underlyingUpper = underlying.toUpperCase()
 
-    const expiries = await getExpiryDates(underlyingUpper)
+    const allExpiries = await getExpiryDates(underlyingUpper)
 
     const today = new Date().toISOString().split('T')[0]
-    const nearestExpiry = expiries.find(e => e >= today) || expiries[0] || ''
+    const startIdx = allExpiries.findIndex(e => e >= today)
+    const from = startIdx >= 0 ? startIdx : 0
+    const expiries = allExpiries.slice(from, from + 4)
+    const nearestExpiry = expiries[0] || ''
 
     return NextResponse.json({
       success: true,
