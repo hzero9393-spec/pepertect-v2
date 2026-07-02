@@ -39,6 +39,7 @@ import {
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { TrendingUp } from 'lucide-react'
 import { GlobalSLMonitor } from '@/components/pepertect/global-sl-monitor'
+import { MobileSwipeNavigator } from '@/components/pepertect/mobile-swipe-navigator'
 
 // Footer page IDs — these pages show their own footer-free layout
 const FOOTER_PAGES = new Set([
@@ -266,6 +267,7 @@ export function AppShell() {
         <WatchlistSidebar />
 
         {/* Main Content */}
+        <MobileSwipeNavigator>
         <main
           className={`flex-1 md:ml-[240px] pb-16 md:pb-0 transition-all duration-300 ${isFooterPage ? 'mt-14' : 'mt-[92px]'}`}
           style={{ marginRight: watchlistSidebarOpen ? 280 : 0 }}
@@ -275,6 +277,7 @@ export function AppShell() {
           {/* Footer - only show on profile, help/support, and footer pages */}
           {(currentPage === 'profile' || currentPage === 'helpSupport' || isFooterPage) && <Footer />}
         </main>
+        </MobileSwipeNavigator>
 
         {/* Mobile Bottom Nav */}
         {!isFooterPage && <MobileNav />}
