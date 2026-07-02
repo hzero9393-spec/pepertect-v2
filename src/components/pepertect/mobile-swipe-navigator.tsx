@@ -6,14 +6,17 @@ import { useAppStore, type PageId } from '@/lib/store'
 // Pages in swipe order (same as mobile nav bar)
 const SWIPE_PAGES: PageId[] = ['dashboard', 'trading', 'watchlist', 'positions', 'orders']
 
-const SWIPE_THRESHOLD = 60       // min px to trigger navigation
-const RUBBER_BAND_MAX = 40       // max px of drag feedback
-const ANIM_DURATION = 220        // ms for slide animation
-const VELOCITY_THRESHOLD = 0.3   // px/ms — fast flick detection
+const SWIPE_THRESHOLD = 50       // min px to trigger
+const RUBBER_BAND_MAX = 35       // max px of drag feedback
+const EXIT_DURATION = 160        // ms — current page exits
+const ENTER_DURATION = 180       // ms — new page enters
+const VELOCITY_THRESHOLD = 0.35  // px/ms — fast flick
 
 function getSwipeIndex(page: PageId): number {
   return SWIPE_PAGES.indexOf(page)
 }
+
+type AnimPhase = 'idle' | 'exit-left' | 'exit-right' | 'enter-from-right' | 'enter-from-left'
 
 export function MobileSwipeNavigator({ children }: { children: ReactNode }) {
   const { currentPage, setCurrentPage } = useAppStore()
@@ -22,29 +25,27 @@ export function MobileSwipeNavigator({ children }: { children: ReactNode }) {
   const touchStartY = useRef(0)
   const touchStartTime = useRef(0)
   const isSwiping = useRef(false)
-  const isAnimating = useRef(false)
+  const isLocked = useRef(false)
 
-  // Drag offset for rubber-band effect
   const [dragOffset, setDragOffset] = useState(0)
-
-  // Slide animation state
-  const [slideAnim, setSlideAnim] = useState<'idle' | 'slide-out-left' | 'slide-out-right' | 'slide-in-left' | 'slide-in-right'>('idle')
+  const [phase, setPhase] = useState<AnimPhase>('idle')
 
   const currentIndex = getSwipeIndex(currentPage)
   const isSwipeable = currentIndex >= 0
 
-  // Lock body scroll during animation
+  // Lock scroll during animation
   useEffect(() => {
-    if (slideAnim !== 'idle') {
+    if (phase !== 'idle') {
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = ''
     }
     return () => { document.body.style.overflow = '' }
-  }, [slideAnim])
+  }, [phase])
 
+  // ── Touch Handlers ──────────────────────────────────────────
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (!isSwipeable || isAnimating.current) return
+    if (!isSwipeable || isLocked.current) return
     touchStartX.current = e.touches[0].clientX
     touchStartY.current = e.touches[0].clientY
     touchStartTime.current = Date.now()
@@ -52,106 +53,94 @@ export function MobileSwipeNavigator({ children }: { children: ReactNode }) {
   }, [isSwipeable])
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!isSwipeable || isAnimating.current) return
+    if (!isSwipeable || isLocked.current) return
 
-    const deltaX = e.touches[0].clientX - touchStartX.current
-    const deltaY = Math.abs(e.touches[0].clientY - touchStartY.current)
+    const dx = e.touches[0].clientX - touchStartX.current
+    const dy = Math.abs(e.touches[0].clientY - touchStartY.current)
 
-    // Once vertical scroll is detected, don't interfere
-    if (deltaY > Math.abs(deltaX) && !isSwiping.current) return
-
-    // If already scrolling vertically, skip
-    if (isSwiping.current === false && deltaY > 10) return
+    // Don't interfere with vertical scroll
+    if (dy > Math.abs(dx) && !isSwiping.current) return
+    if (!isSwiping.current && dy > 8) return
 
     isSwiping.current = true
 
-    // Apply rubber-band effect — clamp and dampen
-    let offset = deltaX
-    const atStart = currentIndex === 0 && deltaX > 0
-    const atEnd = currentIndex === SWIPE_PAGES.length - 1 && deltaX < 0
-
-    if (atStart || atEnd) {
-      // Dampen at edges (rubber band)
-      offset = deltaX * 0.25
+    // Rubber-band at edges
+    let offset = dx
+    if ((currentIndex === 0 && dx > 0) || (currentIndex === SWIPE_PAGES.length - 1 && dx < 0)) {
+      offset = dx * 0.2
     }
-
-    // Clamp
     offset = Math.max(-RUBBER_BAND_MAX, Math.min(RUBBER_BAND_MAX, offset))
     setDragOffset(offset)
   }, [isSwipeable, currentIndex])
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (!isSwipeable || isAnimating.current) {
+    if (!isSwipeable || isLocked.current) {
       setDragOffset(0)
       return
     }
 
-    const deltaX = e.changedTouches[0].clientX - touchStartX.current
-    const deltaY = Math.abs(e.changedTouches[0].clientY - touchStartY.current)
+    const dx = e.changedTouches[0].clientX - touchStartX.current
     const elapsed = Date.now() - touchStartTime.current
-    const velocity = Math.abs(deltaX) / elapsed
+    const velocity = Math.abs(dx) / elapsed
 
-    // Reset drag
     setDragOffset(0)
 
-    // Not a valid swipe
     if (!isSwiping.current) return
-    if (Math.abs(deltaX) < SWIPE_THRESHOLD && velocity < VELOCITY_THRESHOLD) return
+    if (Math.abs(dx) < SWIPE_THRESHOLD && velocity < VELOCITY_THRESHOLD) return
 
     isSwiping.current = false
-    isAnimating.current = true
+    isLocked.current = true
 
-    if (deltaX < 0 && currentIndex < SWIPE_PAGES.length - 1) {
-      // Swipe LEFT → go to NEXT page
-      setSlideAnim('slide-out-left')
+    if (dx < 0 && currentIndex < SWIPE_PAGES.length - 1) {
+      // ── Swipe LEFT → NEXT page ──
+      setPhase('exit-left')
+      // After exit animation finishes, switch page + enter from right
       setTimeout(() => {
         setCurrentPage(SWIPE_PAGES[currentIndex + 1])
-        setSlideAnim('slide-in-left')
-        setTimeout(() => {
-          setSlideAnim('idle')
-          isAnimating.current = false
-        }, ANIM_DURATION)
-      }, ANIM_DURATION)
-    } else if (deltaX > 0 && currentIndex > 0) {
-      // Swipe RIGHT → go to PREVIOUS page
-      setSlideAnim('slide-out-right')
+        setPhase('enter-from-right')
+      }, EXIT_DURATION)
+    } else if (dx > 0 && currentIndex > 0) {
+      // ── Swipe RIGHT → PREVIOUS page ──
+      setPhase('exit-right')
       setTimeout(() => {
         setCurrentPage(SWIPE_PAGES[currentIndex - 1])
-        setSlideAnim('slide-in-right')
-        setTimeout(() => {
-          setSlideAnim('idle')
-          isAnimating.current = false
-        }, ANIM_DURATION)
-      }, ANIM_DURATION)
+        setPhase('enter-from-left')
+      }, EXIT_DURATION)
     } else {
-      isAnimating.current = false
+      isLocked.current = false
     }
   }, [isSwipeable, currentIndex, setCurrentPage])
 
-  // Don't wrap non-swipeable pages
+  // ── Handle enter animation end ──
+  const handleAnimEnd = useCallback(() => {
+    if (phase === 'enter-from-right' || phase === 'enter-from-left') {
+      setPhase('idle')
+      isLocked.current = false
+    }
+  }, [phase])
+
+  // Non-swipeable pages: pass through
   if (!isSwipeable) return <>{children}</>
 
-  // Compute transform based on animation state + drag
-  let transform = `translateX(${dragOffset}px)`
-  let transition = 'transform 80ms ease-out'
-  let opacity = '1'
+  // ── Compute styles per phase ──
+  let animClass = ''
+  let inlineTransform = ''
+  let inlineTransition = ''
 
-  if (slideAnim === 'slide-out-left') {
-    transform = 'translateX(-100%)'
-    transition = `transform ${ANIM_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${ANIM_DURATION}ms ease`
-    opacity = '0.6'
-  } else if (slideAnim === 'slide-out-right') {
-    transform = 'translateX(100%)'
-    transition = `transform ${ANIM_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${ANIM_DURATION}ms ease`
-    opacity = '0.6'
-  } else if (slideAnim === 'slide-in-left') {
-    transform = 'translateX(100%)'
-    transition = `transform ${ANIM_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${ANIM_DURATION}ms ease`
-    opacity = '0.6'
-  } else if (slideAnim === 'slide-in-right') {
-    transform = 'translateX(-100%)'
-    transition = `transform ${ANIM_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${ANIM_DURATION}ms ease`
-    opacity = '0.6'
+  if (phase === 'idle') {
+    // Drag follows finger
+    if (dragOffset !== 0) {
+      inlineTransform = `translateX(${dragOffset}px)`
+      inlineTransition = 'transform 60ms ease-out'
+    }
+  } else if (phase === 'exit-left') {
+    animClass = 'swipe-exit-left'
+  } else if (phase === 'exit-right') {
+    animClass = 'swipe-exit-right'
+  } else if (phase === 'enter-from-right') {
+    animClass = 'swipe-enter-right'
+  } else if (phase === 'enter-from-left') {
+    animClass = 'swipe-enter-left'
   }
 
   return (
@@ -164,12 +153,14 @@ export function MobileSwipeNavigator({ children }: { children: ReactNode }) {
       style={{ touchAction: 'pan-y' }}
     >
       <div
+        className={animClass}
         style={{
-          transform,
-          transition,
-          opacity,
-          willChange: slideAnim !== 'idle' ? 'transform, opacity' : 'auto',
+          transform: inlineTransform || undefined,
+          transition: inlineTransition || undefined,
+          willChange: phase !== 'idle' ? 'transform, opacity' : 'auto',
+          animationFillMode: 'forwards',
         }}
+        onAnimationEnd={handleAnimEnd}
       >
         {children}
       </div>

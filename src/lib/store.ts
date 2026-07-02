@@ -27,12 +27,12 @@ export type PageId =
   | 'about-us'
   | 'refund-policy'
 
-export type PositionsTab = 'stocks' | 'index' | 'nifty' | 'banknifty' | 'finnifty'
+export type PositionsTab = 'stocks' | 'index'
 
 // ─── URL Mapping ──────────────────────────────────────────────────────────
 
 /** Valid positions sub-tabs */
-const VALID_POSITIONS_TABS = new Set<PositionsTab>(['stocks', 'index', 'nifty', 'banknifty', 'finnifty'])
+const VALID_POSITIONS_TABS = new Set<PositionsTab>(['stocks', 'index'])
 
 /** Map PageId to URL path (positions tab is handled separately) */
 const pageToUrlMap: Record<PageId, string> = {

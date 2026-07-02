@@ -787,7 +787,7 @@ function PositionDetailSheet({
 
 // ─── Segment Sub-Tab ────────────────────────────────────────────
 
-type SegmentTab = 'stocks' | 'index' | 'nifty' | 'banknifty' | 'finnifty'
+type SegmentTab = 'stocks' | 'index'
 
 // ─── Main Component ─────────────────────────────────────────────
 
@@ -1154,10 +1154,10 @@ export function PositionsPage() {
           </div>
         </div>
 
-        {/* ── Segment Sub-Tabs: Stocks / Nifty / BankNifty / Finnifty / Index ── */}
-        <div className="flex items-center gap-1 bg-white border border-[#e5e7eb] p-1 rounded-xl w-fit overflow-x-auto">
+        {/* ── Segment Sub-Tabs: Stocks / Index ─────────────────── */}
+        <div className="flex items-center gap-1 bg-white border border-[#e5e7eb] p-1 rounded-xl w-fit">
           <button
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold transition-all ${
               segmentTab === 'stocks'
                 ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
                 : 'text-[#6b7280] hover:text-[#1a1a1a] border border-transparent'
@@ -1175,40 +1175,7 @@ export function PositionsPage() {
             </span>
           </button>
           <button
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all whitespace-nowrap ${
-              segmentTab === 'nifty'
-                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
-                : 'text-[#6b7280] hover:text-[#1a1a1a] border border-transparent'
-            }`}
-            onClick={() => setPositionsTab('nifty')}
-          >
-            <LineChart className="size-3.5" />
-            Nifty
-          </button>
-          <button
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all whitespace-nowrap ${
-              segmentTab === 'banknifty'
-                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
-                : 'text-[#6b7280] hover:text-[#1a1a1a] border border-transparent'
-            }`}
-            onClick={() => setPositionsTab('banknifty')}
-          >
-            <LineChart className="size-3.5" />
-            BankNifty
-          </button>
-          <button
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all whitespace-nowrap ${
-              segmentTab === 'finnifty'
-                ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
-                : 'text-[#6b7280] hover:text-[#1a1a1a] border border-transparent'
-            }`}
-            onClick={() => setPositionsTab('finnifty')}
-          >
-            <LineChart className="size-3.5" />
-            Finnifty
-          </button>
-          <button
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold transition-all ${
               segmentTab === 'index'
                 ? 'bg-[#00D09C]/10 text-[#00D09C] border border-[#00D09C]/20'
                 : 'text-[#6b7280] hover:text-[#1a1a1a] border border-transparent'
@@ -1216,9 +1183,9 @@ export function PositionsPage() {
             onClick={() => setPositionsTab('index')}
           >
             <LineChart className="size-3.5" />
-            All Index
+            Index
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-              !isStockSegment
+              segmentTab === 'index'
                 ? 'bg-[#00D09C]/15 text-[#00D09C]'
                 : 'bg-[#6b7280]/10 text-[#6b7280]'
             }`}>
