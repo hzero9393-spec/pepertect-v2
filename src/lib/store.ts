@@ -123,6 +123,7 @@ interface AppState {
   // Shared date filter state (persists across pages)
   dateFilterPreset: DateFilterPreset
   dateFilterRange: DateRange | undefined
+  tradeSignal: number          // bumped after any trade/square-off to trigger cross-page refresh
   setDateFilter: (preset: DateFilterPreset, range?: DateRange) => void
   setCurrentPage: (page: PageId) => void
   setSidebarOpen: (open: boolean) => void
@@ -133,6 +134,7 @@ interface AppState {
   navigateToIndex: (symbol: string) => void
   initFromUrl: () => void
   setUrlSyncEnabled: (enabled: boolean) => void
+  bumpTradeSignal: () => void   // call after trade/square-off to notify positions page
 }
 
 // ─── URL Push Helper ──────────────────────────────────────────────────────
@@ -156,6 +158,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   urlSyncEnabled: true,
   dateFilterPreset: 'all',
   dateFilterRange: undefined,
+  tradeSignal: 0,
   
   setCurrentPage: (page) => {
     const state = get()
@@ -201,4 +204,5 @@ export const useAppStore = create<AppState>((set, get) => ({
   
   setDateFilter: (preset, range) => set({ dateFilterPreset: preset, dateFilterRange: range }),
   setUrlSyncEnabled: (enabled) => set({ urlSyncEnabled: enabled }),
+  bumpTradeSignal: () => set(s => ({ tradeSignal: s.tradeSignal + 1 })),
 }))

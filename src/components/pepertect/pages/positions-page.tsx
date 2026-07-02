@@ -622,6 +622,7 @@ type SegmentTab = 'stocks' | 'index'
 
 export function PositionsPage() {
   const { token } = useAuthStore()
+  const tradeSignal = useAppStore(s => s.tradeSignal)
   const { setCurrentPage } = useAppStore()
   const [positions, setPositions] = useState<PositionData[]>([])
   const [loading, setLoading] = useState(true)
@@ -716,7 +717,7 @@ export function PositionsPage() {
     } finally {
       setLoading(false)
     }
-  }, [token, wsStatus])
+  }, [token, wsStatus, tradeSignal])
 
   useEffect(() => {
     fetchPositions()

@@ -439,6 +439,7 @@ function OrderPanel({
           totalValue: data.order?.totalValue,
           brokerage: data.order?.brokerage,
         })
+        bumpTradeSignal() // notify positions page to refetch
         await handleTradeSuccess()
         return {
           success: true,
@@ -681,7 +682,7 @@ function OrderPanel({
 
 export function TradingPage() {
   const { token, user } = useAuthStore()
-  const { setCurrentPage, navigateToStock } = useAppStore()
+  const { setCurrentPage, navigateToStock, bumpTradeSignal } = useAppStore()
   const { showTradeSuccess } = useTradeSuccess()
   const { setSymbols: setWatchlistSymbols, loaded: watchlistLoaded } = useWatchlistStore()
 

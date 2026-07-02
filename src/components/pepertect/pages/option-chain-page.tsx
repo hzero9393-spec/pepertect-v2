@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/lib/auth-store'
+import { useAppStore } from '@/lib/store'
 import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
 import { TradeConfirmModal, TradeConfirmData } from '@/components/pepertect/ui/trade-confirm-modal'
 import { X, Minus, Plus, ChevronDown } from 'lucide-react'
@@ -143,6 +144,7 @@ export function OptionChainPage() {
   const token = useAuthStore(s => s.token)
   const userData = useAuthStore(s => s.user)
   const setUser = useAuthStore(s => s.setUser)
+  const bumpTradeSignal = useAppStore(s => s.bumpTradeSignal)
   const { showTradeSuccess } = useTradeSuccess()
 
   // Start SL/Target monitor
@@ -331,6 +333,7 @@ export function OptionChainPage() {
           totalValue: resData.order?.totalValue,
           brokerage: resData.order?.brokerage,
         })
+        bumpTradeSignal() // notify positions page to refetch
         if (resData.balance !== undefined && userData) {
           setUser({ ...userData, virtualBalance: resData.balance, totalPnl: resData.totalPnl ?? userData.totalPnl })
           // Also refresh full user data from server to sync marginUsed

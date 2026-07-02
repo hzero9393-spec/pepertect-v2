@@ -33,6 +33,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { useAuthStore } from '@/lib/auth-store'
+import { useAppStore } from '@/lib/store'
 import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
 import { toast } from 'sonner'
 import { formatINR, formatPnL, formatPercent } from '@/lib/format'
@@ -108,6 +109,7 @@ const INSTRUMENT_CONFIG: Record<Instrument, { lotSize: number }> = {
 // ─── Main Component ──────────────────────────────────────────────────
 export function FuturesPage() {
   const { token } = useAuthStore()
+  const bumpTradeSignal = useAppStore(s => s.bumpTradeSignal)
   const { showTradeSuccess } = useTradeSuccess()
 
   const [instrument, setInstrument] = useState<Instrument>('NIFTY')
@@ -261,6 +263,7 @@ export function FuturesPage() {
       const data = await res.json()
       if (res.ok && data.success) {
         toast.success(data.message)
+        bumpTradeSignal() // notify positions page
         showTradeSuccess({
           symbol: instrument,
           type: direction,
