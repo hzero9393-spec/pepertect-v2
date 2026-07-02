@@ -97,13 +97,13 @@ export function MobileSwipeNavigator({ children }: { children: ReactNode }) {
     // Prevent browser scroll during horizontal swipe
     e.preventDefault()
 
-    // Rubber-band at edges
-    let offset = dx
-    const atLeftEdge = currentIndex === 0 && dx > 0
-    const atRightEdge = currentIndex === SWIPE_PAGES.length - 1 && dx < 0
+    // INVERTED: content moves opposite to finger (like pushing a page away)
+    let offset = -dx
+    const atStart = currentIndex === 0 && dx < 0   // can't go before first
+    const atEnd = currentIndex === SWIPE_PAGES.length - 1 && dx > 0  // can't go past last
 
-    if (atLeftEdge || atRightEdge) {
-      offset = dx * 0.15
+    if (atStart || atEnd) {
+      offset = -dx * 0.15
     }
 
     // Subtle opacity + scale for depth
@@ -159,10 +159,12 @@ export function MobileSwipeNavigator({ children }: { children: ReactNode }) {
     // ── Commit navigation ──
     locked.current = true
 
-    const goLeft = dx < 0 && currentIndex < SWIPE_PAGES.length - 1
-    const goRight = dx > 0 && currentIndex > 0
+    // INVERTED: finger right (dx>0) → content left → next page
+    //            finger left  (dx<0) → content right → previous page
+    const goNext = dx > 0 && currentIndex < SWIPE_PAGES.length - 1
+    const goPrev = dx < 0 && currentIndex > 0
 
-    if (!goLeft && !goRight) {
+    if (!goNext && !goPrev) {
       // At edge — snap back
       addTransition(SNAP_MS)
       setTransform(0, 1)
@@ -175,13 +177,14 @@ export function MobileSwipeNavigator({ children }: { children: ReactNode }) {
       return
     }
 
-    const direction = goLeft ? -1 : 1
-    const targetIndex = currentIndex + direction
+    // goNext → slide content LEFT (negative), goPrev → slide content RIGHT (positive)
+    const slideDir = goNext ? -1 : 1
+    const targetIndex = goNext ? currentIndex + 1 : currentIndex - 1
     const screenW = window.innerWidth
 
     // Slide current content off-screen
     addTransition(COMMIT_MS)
-    setTransform(direction * screenW, 0.3)
+    setTransform(slideDir * screenW, 0.3)
 
     const onSlideOff = () => {
       panelRef.current?.removeEventListener('transitionend', onSlideOff)
