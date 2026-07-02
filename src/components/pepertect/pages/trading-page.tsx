@@ -344,6 +344,8 @@ function OrderPanel({
   const [productType, setProductType] = useState('INTRADAY')
   const [quantity, setQuantity] = useState(10)
   const [price, setPrice] = useState('')
+  const [stopLoss, setStopLoss] = useState('')
+  const [target, setTarget] = useState('')
   const [placingOrder, setPlacingOrder] = useState(false)
   const [confirmModalOpen, setConfirmModalOpen] = useState(false)
   const [confirmData, setConfirmData] = useState<TradeConfirmData | null>(null)
@@ -440,6 +442,17 @@ function OrderPanel({
           brokerage: data.order?.brokerage,
         })
         bumpTradeSignal() // notify positions page to refetch
+        // Set SL/Target if provided
+        if ((stopLoss || target) && token && data.order?.id) {
+          const slBody: Record<string, unknown> = { stopLoss: null, target: null }
+          if (stopLoss) slBody.stopLoss = parseFloat(stopLoss)
+          if (target) slBody.target = parseFloat(target)
+          fetch('/api/trade/sl-set', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ positionId: data.positionId, ...slBody }),
+          }).catch(() => {})
+        }
         await handleTradeSuccess()
         return {
           success: true,
@@ -604,6 +617,30 @@ function OrderPanel({
             />
           </div>
         )}
+
+        {/* SL / Target */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-[#EB5B3C] uppercase tracking-wider">Stop Loss</label>
+            <Input
+              type="number"
+              value={stopLoss}
+              onChange={(e) => setStopLoss(e.target.value)}
+              className="h-9 font-mono font-tabular border-[#e5e7eb] bg-white text-[#1a1a1a] focus:ring-[#EB5B3C]/20 focus:border-[#EB5B3C]"
+              placeholder="Optional"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-[#00B386] uppercase tracking-wider">Target</label>
+            <Input
+              type="number"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              className="h-9 font-mono font-tabular border-[#e5e7eb] bg-white text-[#1a1a1a] focus:ring-[#00B386]/20 focus:border-[#00B386]"
+              placeholder="Optional"
+            />
+          </div>
+        </div>
 
         {/* Order Summary */}
         <div className="rounded-xl bg-[#f5f7fa] p-4 space-y-2">

@@ -169,9 +169,10 @@ export async function POST(request: NextRequest) {
                 unrealizedPnl: Math.round((newCurrent - newInvested) * 100) / 100,
               }
             })
+            positionId = existingPosition.id
           } else {
             const currentValue = quantity * stock!.currentPrice
-            await tx.position.create({
+            const pos = await tx.position.create({
               data: {
                 userId: user.id, segment: 'EQUITY',
                 productType: productType as 'INTRADAY' | 'DELIVERY' | 'CARRY_FORWARD',
@@ -182,9 +183,10 @@ export async function POST(request: NextRequest) {
                 isOpen: true,
               }
             })
+            positionId = pos.id
           }
 
-          return { order, trade, updatedUser }
+          return { order, trade, updatedUser, positionId }
         })
 
         // Invalidate caches
@@ -198,6 +200,7 @@ export async function POST(request: NextRequest) {
           trade: result.trade,
           balance: result.updatedUser.virtualBalance,
           totalPnl: result.updatedUser.totalPnl,
+          positionId: result.positionId,
         }, { status: 201 })
       }
 

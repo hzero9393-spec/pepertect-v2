@@ -7,7 +7,6 @@ import { useAppStore } from '@/lib/store'
 import { useTradeSuccess } from '@/components/pepertect/trade-success-popup'
 import { TradeConfirmModal, TradeConfirmData } from '@/components/pepertect/ui/trade-confirm-modal'
 import { X, Minus, Plus, ChevronDown } from 'lucide-react'
-import { useSLMonitor } from '@/lib/use-sl-monitor'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -146,9 +145,6 @@ export function OptionChainPage() {
   const setUser = useAuthStore(s => s.setUser)
   const bumpTradeSignal = useAppStore(s => s.bumpTradeSignal)
   const { showTradeSuccess } = useTradeSuccess()
-
-  // Start SL/Target monitor
-  useSLMonitor()
 
   const lotSize = INDICES.find(i => i.key === index)?.lotSize || 50
   const availableMargin = userData ? (userData.virtualBalance - (userData.marginUsed || 0)) : 0

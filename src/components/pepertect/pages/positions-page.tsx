@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Input } from '@/components/ui/input'
 import {
   Sheet,
   SheetContent,
@@ -63,6 +64,8 @@ interface PositionData {
   lotSize: number
   isOpen: boolean
   createdAt: string
+  stopLoss?: number | null
+  target?: number | null
 }
 
 // Helper to determine if a position is a Stock (EQUITY) or Index (FUTURES/OPTIONS)
@@ -212,6 +215,12 @@ const OpenPositionCard = memo(function OpenPositionCard({
                 LIVE
               </span>
             )}
+            {pos.stopLoss && pos.stopLoss > 0 && (
+              <span className="text-[8px] font-bold text-[#EB5B3C] bg-[#EB5B3C]/10 px-1.5 py-0.5 rounded-full shrink-0">SL</span>
+            )}
+            {pos.target && pos.target > 0 && (
+              <span className="text-[8px] font-bold text-[#00B386] bg-[#00B386]/10 px-1.5 py-0.5 rounded-full shrink-0">TGT</span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 text-[11px] text-[#6b7280]">
             {pos.segment === 'OPTIONS' && pos.strikePrice && (
@@ -249,6 +258,24 @@ const OpenPositionCard = memo(function OpenPositionCard({
             <span className="text-[#6b7280] text-[10px] font-medium">LTP</span>
             <LivePriceCell price={livePrice} prevPrice={prevPrice} />
           </div>
+          {pos.stopLoss && pos.stopLoss > 0 && (
+            <>
+              <ChevronRight className="size-3 text-[#9ca3af]" />
+              <div className="flex flex-col">
+                <span className="text-[#EB5B3C] text-[10px] font-medium">SL</span>
+                <span className="font-mono-data font-tabular text-[#EB5B3C] font-medium">{formatPrice(pos.stopLoss)}</span>
+              </div>
+            </>
+          )}
+          {pos.target && pos.target > 0 && (
+            <>
+              <ChevronRight className="size-3 text-[#9ca3af]" />
+              <div className="flex flex-col">
+                <span className="text-[#00B386] text-[10px] font-medium">TGT</span>
+                <span className="font-mono-data font-tabular text-[#00B386] font-medium">{formatPrice(pos.target)}</span>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -453,6 +480,121 @@ function DetailRow({ icon: Icon, label, value, valueClass }: {
   )
 }
 
+// ─── SL / Target Editor ────────────────────────────────────────
+
+function SLEditor({ position }: { position: PositionData }) {
+  const token = useAuthStore(s => s.token)
+  const [sl, setSl] = useState(position.stopLoss ? String(position.stopLoss) : '')
+  const [tgt, setTgt] = useState(position.target ? String(position.target) : '')
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    if (!token || !sl && !tgt) return
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = { positionId: position.id, stopLoss: null, target: null }
+      if (sl) body.stopLoss = parseFloat(sl)
+      if (tgt) body.target = parseFloat(tgt)
+      const res = await fetch('/api/trade/sl-set', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (res.ok && data.success) {
+        toast.success(`SL/Target updated for ${position.symbol}`)
+      } else {
+        toast.error(data.error || 'Failed to update SL/Target')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRemove = async () => {
+    if (!token) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/trade/sl-set', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positionId: position.id }),
+      })
+      if (res.ok) {
+        setSl('')
+        setTgt('')
+        toast.success('SL/Target removed')
+      }
+    } catch {
+      toast.error('Failed to remove')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const hasSL = position.stopLoss && position.stopLoss > 0
+  const hasTarget = position.target && position.target > 0
+  const entry = position.entryPrice
+  const isBuy = position.tradeDirection === 'BUY'
+
+  return (
+    <div className="mt-3 pt-3 border-t border-[#e5e7eb] space-y-2.5">
+      <div className="text-[11px] font-bold text-[#6b7280] uppercase tracking-wider">Stop Loss / Target</div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-[#EB5B3C] uppercase tracking-wider">Stop Loss</label>
+          <Input
+            type="number"
+            value={sl}
+            onChange={e => setSl(e.target.value)}
+            className="h-9 font-mono text-xs border-[#e5e7eb] bg-white focus:ring-[#EB5B3C]/20 focus:border-[#EB5B3C]"
+            placeholder={isBuy ? `Below ${entry}` : `Above ${entry}`}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-[#00B386] uppercase tracking-wider">Target</label>
+          <Input
+            type="number"
+            value={tgt}
+            onChange={e => setTgt(e.target.value)}
+            className="h-9 font-mono text-xs border-[#e5e7eb] bg-white focus:ring-[#00B386]/20 focus:border-[#00B386]"
+            placeholder={isBuy ? `Above ${entry}` : `Below ${entry}`}
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={handleSave}
+          disabled={saving || (!sl && !tgt)}
+          className="flex-1 h-9 rounded-lg text-[11px] font-bold bg-[#00D09C] hover:bg-[#00b386] text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+        >
+          {saving ? 'Saving...' : 'Update'}
+        </button>
+        {(hasSL || hasTarget) && (
+          <button
+            onClick={handleRemove}
+            disabled={saving}
+            className="h-9 px-3 rounded-lg text-[11px] font-bold bg-[#f5f7fa] hover:bg-[#e5e7eb] text-[#6b7280] disabled:opacity-40 transition-all"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      {(hasSL || hasTarget) && (
+        <div className="flex gap-3 text-[10px] text-[#6b7280]">
+          {hasSL && <span>SL: <b className="text-[#EB5B3C]">₹{position.stopLoss}</b></span>}
+          {hasTarget && <span>Target: <b className="text-[#00B386]">₹{position.target}</b></span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Position Detail Sheet ──────────────────────────────────────
 
 function PositionDetailSheet({
@@ -588,6 +730,11 @@ function PositionDetailSheet({
             <DetailRow icon={Clock} label="Holding Duration" value={formatDuration(position.createdAt)} />
           )}
         </div>
+
+        {/* SL / Target Edit */}
+        {isPositionOpen && (
+          <SLEditor position={position} />
+        )}
 
         {/* Square Off button for open positions */}
         {isPositionOpen && (

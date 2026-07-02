@@ -58,6 +58,9 @@ interface TriggerResult {
   exitError?: string
   pnl?: number
   message?: string
+  symbol?: string
+  segment?: string
+  tradeDirection?: string
 }
 
 interface MonitorCycleResult {
@@ -559,6 +562,9 @@ export async function checkUserPositions(userId: string): Promise<{
           exitSuccess: exitResult.success,
           exitError: exitResult.error,
           pnl: exitResult.pnl,
+          symbol: position.symbol,
+          segment: position.segment,
+          tradeDirection: position.tradeDirection,
         })
 
         if (exitResult.success) break // Process one at a time per user for safety

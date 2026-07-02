@@ -38,6 +38,7 @@ import {
 } from '@/components/pepertect/footer-pages'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { TrendingUp } from 'lucide-react'
+import { GlobalSLMonitor } from '@/components/pepertect/global-sl-monitor'
 
 // Footer page IDs — these pages show their own footer-free layout
 const FOOTER_PAGES = new Set([
@@ -238,6 +239,7 @@ export function AppShell() {
 
   return (
     <TradeSuccessProvider>
+      <GlobalSLMonitor />
       <div className="flex min-h-screen flex-col" style={{ background: '#f5f7fa' }}>
         {/* Desktop Sidebar */}
         <Sidebar onLogout={handleLogout} userName={user?.name} userEmail={user?.email} userRole={user?.role} userAvatar={user?.avatar} />
