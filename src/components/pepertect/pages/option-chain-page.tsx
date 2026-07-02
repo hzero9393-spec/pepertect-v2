@@ -250,8 +250,21 @@ export function OptionChainPage() {
   const totalValue = totalQty * fillPrice
   const brokerage = totalValue > 0 ? Math.max(20, Math.min(500, totalValue * 0.0005)) : 0
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
     if (!token || fillPrice <= 0) return
+
+    // Refresh user data to get latest marginUsed before showing confirm
+    let freshAvailable = availableMargin // fallback to current state
+    try {
+      const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      if (meRes.ok) {
+        const meData = await meRes.json()
+        if (meData.user) {
+          setUser(meData.user)
+          freshAvailable = meData.user.virtualBalance - (meData.user.marginUsed || 0)
+        }
+      }
+    } catch {}
 
     setConfirmData({
       symbol: index,
@@ -263,7 +276,7 @@ export function OptionChainPage() {
       price: fillPrice,
       totalValue: Math.round(totalValue * 100) / 100,
       brokerage: Math.round(brokerage * 100) / 100,
-      availableBalance: 0,
+      availableBalance: freshAvailable,
       optionType: trade.optionType,
       strikePrice: trade.strike,
       lots: trade.lots,
@@ -271,7 +284,7 @@ export function OptionChainPage() {
       expiryDate: expiry,
     })
     setConfirmOpen(true)
-  }, [token, trade, fillPrice, totalQty, totalValue, brokerage, lotSize, index, expiry])
+  }, [token, trade, fillPrice, totalQty, totalValue, brokerage, lotSize, index, expiry, availableMargin, setUser])
 
   const executeTrade = useCallback(async () => {
     if (!token) return { success: false, error: 'Not logged in' }
@@ -320,6 +333,11 @@ export function OptionChainPage() {
         })
         if (resData.balance !== undefined && userData) {
           setUser({ ...userData, virtualBalance: resData.balance, totalPnl: resData.totalPnl ?? userData.totalPnl })
+          // Also refresh full user data from server to sync marginUsed
+          fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d?.user) setUser(d.user) })
+            .catch(() => {})
         }
         // Set SL/Target on the newly created position if provided
         if ((trade.stopLoss || trade.target) && token && resData.order?.id) {
