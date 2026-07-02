@@ -1,166 +1,229 @@
 'use client'
 
-import { useRef, useState, useCallback, useEffect, type ReactNode } from 'react'
+import { useRef, useCallback, type ReactNode } from 'react'
 import { useAppStore, type PageId } from '@/lib/store'
 
 // Pages in swipe order (same as mobile nav bar)
 const SWIPE_PAGES: PageId[] = ['dashboard', 'trading', 'watchlist', 'positions', 'orders']
 
-const SWIPE_THRESHOLD = 50       // min px to trigger
-const RUBBER_BAND_MAX = 35       // max px of drag feedback
-const EXIT_DURATION = 160        // ms — current page exits
-const ENTER_DURATION = 180       // ms — new page enters
-const VELOCITY_THRESHOLD = 0.35  // px/ms — fast flick
+const SWIPE_THRESHOLD = 45        // min px to commit navigation
+const VELOCITY_THRESHOLD = 0.3    // px/ms — fast flick
+const SNAP_MS = 220               // ms for snap-back or commit animation
+const COMMIT_MS = 200             // ms for the final slide-off
 
 function getSwipeIndex(page: PageId): number {
   return SWIPE_PAGES.indexOf(page)
 }
 
-type AnimPhase = 'idle' | 'exit-left' | 'exit-right' | 'enter-from-right' | 'enter-from-left'
-
 export function MobileSwipeNavigator({ children }: { children: ReactNode }) {
   const { currentPage, setCurrentPage } = useAppStore()
-  const containerRef = useRef<HTMLDivElement>(null)
-  const touchStartX = useRef(0)
-  const touchStartY = useRef(0)
-  const touchStartTime = useRef(0)
-  const isSwiping = useRef(false)
-  const isLocked = useRef(false)
+  const wrapperRef = useRef<HTMLDivElement>(null)    // outer touch catcher
+  const panelRef = useRef<HTMLDivElement>(null)      // inner sliding panel
 
-  const [dragOffset, setDragOffset] = useState(0)
-  const [phase, setPhase] = useState<AnimPhase>('idle')
+  // Touch tracking — all refs, zero React state during drag
+  const startX = useRef(0)
+  const startY = useRef(0)
+  const startTime = useRef(0)
+  const decided = useRef(false)   // have we decided horizontal vs vertical?
+  const swiping = useRef(false)   // confirmed horizontal swipe
+  const locked = useRef(false)    // animation in progress
+  const rafId = useRef(0)
+  const lastX = useRef(0)
 
   const currentIndex = getSwipeIndex(currentPage)
   const isSwipeable = currentIndex >= 0
 
-  // Lock scroll during animation
-  useEffect(() => {
-    if (phase !== 'idle') {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
-    }
-    return () => { document.body.style.overflow = '' }
-  }, [phase])
+  // ── Direct DOM helpers (no React re-render) ───────────────
 
-  // ── Touch Handlers ──────────────────────────────────────────
+  const setTransform = useCallback((x: number, opacity = 1) => {
+    const el = panelRef.current
+    if (!el) return
+    el.style.transform = `translate3d(${x}px, 0, 0)`
+    el.style.opacity = String(opacity)
+  }, [])
+
+  const clearTransform = useCallback(() => {
+    const el = panelRef.current
+    if (!el) return
+    el.style.transform = ''
+    el.style.opacity = ''
+    el.style.transition = ''
+  }, [])
+
+  const addTransition = useCallback((ms: number) => {
+    const el = panelRef.current
+    if (!el) return
+    el.style.transition = `transform ${ms}ms cubic-bezier(0.25, 0.1, 0.25, 1), opacity ${ms}ms ease`
+  }, [])
+
+  // ── Touch Start ─────────────────────────────────────────────
+
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (!isSwipeable || isLocked.current) return
-    touchStartX.current = e.touches[0].clientX
-    touchStartY.current = e.touches[0].clientY
-    touchStartTime.current = Date.now()
-    isSwiping.current = false
+    if (!isSwipeable || locked.current) return
+    const t = e.touches[0]
+    startX.current = t.clientX
+    startY.current = t.clientY
+    startTime.current = Date.now()
+    lastX.current = t.clientX
+    decided.current = false
+    swiping.current = false
   }, [isSwipeable])
 
+  // ── Touch Move — direct DOM only, 60fps ───────────────────
+
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!isSwipeable || isLocked.current) return
+    if (!isSwipeable || locked.current) return
 
-    const dx = e.touches[0].clientX - touchStartX.current
-    const dy = Math.abs(e.touches[0].clientY - touchStartY.current)
+    const t = e.touches[0]
+    const dx = t.clientX - startX.current
+    const dy = Math.abs(t.clientY - startY.current)
 
-    // Don't interfere with vertical scroll
-    if (dy > Math.abs(dx) && !isSwiping.current) return
-    if (!isSwiping.current && dy > 8) return
+    // Decision phase: determine horizontal vs vertical intent
+    if (!decided.current) {
+      if (Math.abs(dx) > 6 || dy > 6) {
+        decided.current = true
+        if (dy >= Math.abs(dx)) {
+          return // let vertical scroll happen naturally
+        }
+        // Confirmed horizontal — prevent scroll
+        swiping.current = true
+      } else {
+        return
+      }
+    }
 
-    isSwiping.current = true
+    if (!swiping.current) return
+
+    // Prevent browser scroll during horizontal swipe
+    e.preventDefault()
 
     // Rubber-band at edges
     let offset = dx
-    if ((currentIndex === 0 && dx > 0) || (currentIndex === SWIPE_PAGES.length - 1 && dx < 0)) {
-      offset = dx * 0.2
+    const atLeftEdge = currentIndex === 0 && dx > 0
+    const atRightEdge = currentIndex === SWIPE_PAGES.length - 1 && dx < 0
+
+    if (atLeftEdge || atRightEdge) {
+      offset = dx * 0.15
     }
-    offset = Math.max(-RUBBER_BAND_MAX, Math.min(RUBBER_BAND_MAX, offset))
-    setDragOffset(offset)
-  }, [isSwipeable, currentIndex])
+
+    // Subtle opacity + scale for depth
+    const progress = Math.min(Math.abs(offset) / 300, 1)
+    const opacity = 1 - progress * 0.3
+
+    // Use rAF to batch DOM writes (one write per frame)
+    cancelAnimationFrame(rafId.current)
+    rafId.current = requestAnimationFrame(() => {
+      setTransform(offset, opacity)
+    })
+
+    lastX.current = t.clientX
+  }, [isSwipeable, currentIndex, setTransform])
+
+  // ── Touch End ──────────────────────────────────────────────
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (!isSwipeable || isLocked.current) {
-      setDragOffset(0)
+    if (!isSwipeable || locked.current) {
+      if (swiping.current) {
+        // Animation was locked, snap back
+        cancelAnimationFrame(rafId.current)
+        addTransition(SNAP_MS)
+        setTransform(0, 1)
+      }
       return
     }
 
-    const dx = e.changedTouches[0].clientX - touchStartX.current
-    const elapsed = Date.now() - touchStartTime.current
+    cancelAnimationFrame(rafId.current)
+
+    const dx = e.changedTouches[0].clientX - startX.current
+    const elapsed = Date.now() - startTime.current
     const velocity = Math.abs(dx) / elapsed
 
-    setDragOffset(0)
+    if (!swiping.current) return
 
-    if (!isSwiping.current) return
-    if (Math.abs(dx) < SWIPE_THRESHOLD && velocity < VELOCITY_THRESHOLD) return
+    const shouldNavigate =
+      (Math.abs(dx) > SWIPE_THRESHOLD) || (velocity > VELOCITY_THRESHOLD)
 
-    isSwiping.current = false
-    isLocked.current = true
-
-    if (dx < 0 && currentIndex < SWIPE_PAGES.length - 1) {
-      // ── Swipe LEFT → NEXT page ──
-      setPhase('exit-left')
-      // After exit animation finishes, switch page + enter from right
-      setTimeout(() => {
-        setCurrentPage(SWIPE_PAGES[currentIndex + 1])
-        setPhase('enter-from-right')
-      }, EXIT_DURATION)
-    } else if (dx > 0 && currentIndex > 0) {
-      // ── Swipe RIGHT → PREVIOUS page ──
-      setPhase('exit-right')
-      setTimeout(() => {
-        setCurrentPage(SWIPE_PAGES[currentIndex - 1])
-        setPhase('enter-from-left')
-      }, EXIT_DURATION)
-    } else {
-      isLocked.current = false
+    if (!shouldNavigate) {
+      // ── Snap back ──
+      addTransition(SNAP_MS)
+      setTransform(0, 1)
+      const onEnd = () => {
+        clearTransform()
+        panelRef.current?.removeEventListener('transitionend', onEnd)
+        swiping.current = false
+      }
+      panelRef.current?.addEventListener('transitionend', onEnd, { once: true })
+      return
     }
-  }, [isSwipeable, currentIndex, setCurrentPage])
 
-  // ── Handle enter animation end ──
-  const handleAnimEnd = useCallback(() => {
-    if (phase === 'enter-from-right' || phase === 'enter-from-left') {
-      setPhase('idle')
-      isLocked.current = false
+    // ── Commit navigation ──
+    locked.current = true
+
+    const goLeft = dx < 0 && currentIndex < SWIPE_PAGES.length - 1
+    const goRight = dx > 0 && currentIndex > 0
+
+    if (!goLeft && !goRight) {
+      // At edge — snap back
+      addTransition(SNAP_MS)
+      setTransform(0, 1)
+      const onEnd = () => {
+        clearTransform()
+        locked.current = false
+        swiping.current = false
+      }
+      panelRef.current?.addEventListener('transitionend', onEnd, { once: true })
+      return
     }
-  }, [phase])
+
+    const direction = goLeft ? -1 : 1
+    const targetIndex = currentIndex + direction
+    const screenW = window.innerWidth
+
+    // Slide current content off-screen
+    addTransition(COMMIT_MS)
+    setTransform(direction * screenW, 0.3)
+
+    const onSlideOff = () => {
+      panelRef.current?.removeEventListener('transitionend', onSlideOff)
+
+      // Switch page (React re-renders new content at transform origin)
+      setCurrentPage(SWIPE_PAGES[targetIndex])
+
+      // Instantly reset — new page appears at center, no animation
+      // Use rAF to ensure React has committed the new render
+      requestAnimationFrame(() => {
+        clearTransform()
+        locked.current = false
+        swiping.current = false
+      })
+    }
+
+    panelRef.current?.addEventListener('transitionend', onSlideOff, { once: true })
+  }, [isSwipeable, currentIndex, setCurrentPage, setTransform, clearTransform, addTransition])
+
+  // Cleanup rAF on unmount
+  const cleanupRaf = useCallback(() => cancelAnimationFrame(rafId.current), [])
+  useRef(cleanupRaf).current
 
   // Non-swipeable pages: pass through
   if (!isSwipeable) return <>{children}</>
 
-  // ── Compute styles per phase ──
-  let animClass = ''
-  let inlineTransform = ''
-  let inlineTransition = ''
-
-  if (phase === 'idle') {
-    // Drag follows finger
-    if (dragOffset !== 0) {
-      inlineTransform = `translateX(${dragOffset}px)`
-      inlineTransition = 'transform 60ms ease-out'
-    }
-  } else if (phase === 'exit-left') {
-    animClass = 'swipe-exit-left'
-  } else if (phase === 'exit-right') {
-    animClass = 'swipe-exit-right'
-  } else if (phase === 'enter-from-right') {
-    animClass = 'swipe-enter-right'
-  } else if (phase === 'enter-from-left') {
-    animClass = 'swipe-enter-left'
-  }
-
   return (
     <div
-      ref={containerRef}
+      ref={wrapperRef}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       className="md:hidden"
-      style={{ touchAction: 'pan-y' }}
+      style={{ touchAction: 'pan-y', overflow: 'hidden' }}
     >
       <div
-        className={animClass}
+        ref={panelRef}
         style={{
-          transform: inlineTransform || undefined,
-          transition: inlineTransition || undefined,
-          willChange: phase !== 'idle' ? 'transform, opacity' : 'auto',
-          animationFillMode: 'forwards',
+          willChange: 'transform, opacity',
+          backfaceVisibility: 'hidden',
+          WebkitBackfaceVisibility: 'hidden',
         }}
-        onAnimationEnd={handleAnimEnd}
       >
         {children}
       </div>
