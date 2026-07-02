@@ -336,53 +336,11 @@ export function DashboardPage() {
     return indices
   }, [indices, wsIndices, isWsConnected])
 
-  // ─── Fast real-time index data via live endpoint ───────────────
+  // ─── Fast real-time index data via SSE (primary) ─────────────
+  // SSE via useIndexData() handles real-time index updates.
+  // No need for separate /api/market/live polling — SSE pushes updates at 500ms.
   useEffect(() => {
-    const fetchLiveData = async () => {
-      try {
-        const res = await fetch('/api/market/live')
-        if (res.ok) {
-          const json = await res.json()
-          if (json.success && json.data?.indices) {
-            const liveIndices = Object.entries(json.data.indices).map(([symbol, quote]: [string, any]) => {
-              const q = quote as { last_price: number; net_change: number; ohlc: { close: number } }
-              const previousClose = q.ohlc.close - q.net_change
-              const changePercent = previousClose > 0 ? (q.net_change / previousClose) * 100 : 0
-              return {
-                id: symbol,
-                symbol,
-                name: symbol, // Will be merged with REST data
-                currentPrice: q.last_price,
-                change: q.net_change,
-                changePercent,
-                isEnabled: true,
-                isRealData: true,
-                dataSource: 'upstox' as const,
-              }
-            })
-            setIndices(prev => {
-              // Merge live data with existing data (preserving names from REST)
-              return prev.map(idx => {
-                const live = liveIndices.find((l: { symbol: string }) => l.symbol === idx.symbol)
-                if (live) {
-                  return { ...idx, ...live, name: idx.name || live.name }
-                }
-                return idx
-              })
-            })
-          }
-        }
-      } catch {
-        // Keep previous data
-      }
-    }
-
-    // Initial fetch of full data (to get names, etc.)
     fetchIndices()
-
-    // Fast live polling at 500ms (server data refreshes ~1s)
-    const liveInterval = setInterval(fetchLiveData, 500)
-    return () => clearInterval(liveInterval)
   }, [fetchIndices])
 
   // ─── Load all data ───────────────────────────────────────────

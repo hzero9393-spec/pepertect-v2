@@ -1,7 +1,7 @@
 /**
  * OptionChainManager — Server-side singleton
  *
- * Polls Upstox option chain API every 1 second for subscribed indices.
+ * Polls Upstox option chain API every 500ms for subscribed indices.
  * Streams updates to connected clients via SSE callbacks.
  * Only polls when at least one subscriber exists.
  *
@@ -95,6 +95,8 @@ class OptionChainManager {
   private latestData = new Map<string, OCUpdate>()
   private pollTimers = new Map<string, ReturnType<typeof setInterval>>()
   private expiriesCache = new Map<string, string[]>()
+  private maxPainCache = new Map<string, { strike: number; spotAtCalc: number }>() // cache max pain per key
+  private fetchInProgress = new Set<string>() // deduplicate overlapping fetches
 
   /** Subscribe to option chain updates for an underlying + expiry */
   subscribe(underlying: string, expiry: string, handler: OCSubscriber): () => void {
@@ -148,10 +150,10 @@ class OptionChainManager {
     // Fetch immediately
     this.fetchAndBroadcast(underlying, expiry)
 
-    // Then every 1 second
+    // Then every 500ms for near real-time data
     const timer = setInterval(() => {
       this.fetchAndBroadcast(underlying, expiry)
-    }, 1000)
+    }, 500)
 
     this.pollTimers.set(key, timer)
   }
@@ -173,6 +175,10 @@ class OptionChainManager {
 
     const key = `${underlying}::${expiry}`
 
+    // Deduplicate: skip if previous fetch for this key is still in flight
+    if (this.fetchInProgress.has(key)) return
+    this.fetchInProgress.add(key)
+
     try {
       const url = `${UPSTOX_API_V2}/option/chain?instrument_key=${encodeURIComponent(config.instrumentKey)}&expiry_date=${encodeURIComponent(expiry)}`
       const res = await fetch(url, {
@@ -181,7 +187,7 @@ class OptionChainManager {
           Accept: 'application/json',
         },
         cache: 'no-store',
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(3000),
       })
 
       if (!res.ok) return
@@ -197,21 +203,29 @@ class OptionChainManager {
       const totalPutOI = chainData.reduce((s, c) => s + (c.put_options?.market_data?.oi || 0), 0)
 
       // Calculate max pain (strike with max combined buyer loss)
+      // Optimization: cache max pain and only recalculate when spot moves > 5 points
       let maxPainStrike = 0
-      let maxBuyerLoss = 0
-      for (const strike of chainData) {
-        const sp = strike.strike_price
-        let callBuyerLoss = 0
-        let putBuyerLoss = 0
-        for (const s of chainData) {
-          callBuyerLoss += Math.max(0, (s.call_options?.market_data?.close_price || 0) - Math.max(sp - s.strike_price, 0))
-          putBuyerLoss += Math.max(0, (s.put_options?.market_data?.close_price || 0) - Math.max(s.strike_price - sp, 0))
+      const cachedMP = this.maxPainCache.get(key)
+      const spotDelta = cachedMP ? Math.abs(spot - cachedMP.spotAtCalc) : Infinity
+      if (cachedMP && spotDelta <= 5) {
+        maxPainStrike = cachedMP.strike
+      } else {
+        let maxBuyerLoss = 0
+        for (const strike of chainData) {
+          const sp = strike.strike_price
+          let callBuyerLoss = 0
+          let putBuyerLoss = 0
+          for (const s of chainData) {
+            callBuyerLoss += Math.max(0, (s.call_options?.market_data?.close_price || 0) - Math.max(sp - s.strike_price, 0))
+            putBuyerLoss += Math.max(0, (s.put_options?.market_data?.close_price || 0) - Math.max(s.strike_price - sp, 0))
+          }
+          const totalLoss = callBuyerLoss + putBuyerLoss
+          if (totalLoss > maxBuyerLoss) {
+            maxBuyerLoss = totalLoss
+            maxPainStrike = sp
+          }
         }
-        const totalLoss = callBuyerLoss + putBuyerLoss
-        if (totalLoss > maxBuyerLoss) {
-          maxBuyerLoss = totalLoss
-          maxPainStrike = sp
-        }
+        this.maxPainCache.set(key, { strike: maxPainStrike, spotAtCalc: spot })
       }
 
       const update: OCUpdate = {
@@ -237,6 +251,8 @@ class OptionChainManager {
       }
     } catch {
       // Silently continue polling
+    } finally {
+      this.fetchInProgress.delete(key)
     }
   }
 

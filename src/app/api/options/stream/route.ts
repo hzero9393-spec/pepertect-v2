@@ -2,6 +2,7 @@ import { getOptionChainManager } from '@/lib/option-chain-manager'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 120
 
 const VALID_UNDERLYINGS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX']
 
@@ -38,16 +39,16 @@ export async function GET(request: Request) {
         send({ type: 'update', data: update })
       })
 
-      // Keep-alive ping every 10 seconds
+      // Keep-alive ping every 20 seconds
       const keepAlive = setInterval(() => {
         try { controller.enqueue(encoder.encode(': keepalive\n\n')) } catch { /* closed */ }
-      }, 10000)
+      }, 20000)
 
-      // Auto-close after 60 seconds (browser reconnects)
+      // Auto-close after 110 seconds (browser reconnects)
       const timeout = setTimeout(() => {
         cleanup()
         controller.close()
-      }, 60000)
+      }, 110000)
 
       const cleanup = () => {
         unsubscribe()

@@ -297,7 +297,7 @@ class MarketDataManager {
     console.log('[MarketSSE] Starting REST polling fallback')
     void this.fetchMarketLive()
 
-    const interval = this._marketClosed ? 30000 : 3000 // 3s polling when market open
+    const interval = this._marketClosed ? 30000 : 1000 // 1s polling when market open
     this.restPollTimer = setInterval(() => {
       void this.fetchMarketLive()
     }, interval)

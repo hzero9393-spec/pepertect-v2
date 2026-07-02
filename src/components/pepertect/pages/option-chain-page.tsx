@@ -173,24 +173,50 @@ export function OptionChainPage() {
     return () => { cancelled = true }
   }, [index])
 
-  // SSE stream
+  // SSE stream — persistent with auto-reconnect
   useEffect(() => {
     if (!expiry) return
-    esRef.current?.close()
 
-    const es = new EventSource(`/api/options/stream?underlying=${index}&expiry=${encodeURIComponent(expiry)}`)
-    esRef.current = es
+    let es: EventSource | null = null
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+    let cancelled = false
 
-    es.onopen = () => setLive(true)
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === 'update' && msg.data) setData(msg.data)
-      } catch { /* */ }
+    const connect = () => {
+      if (cancelled) return
+      es?.close()
+
+      es = new EventSource(`/api/options/stream?underlying=${index}&expiry=${encodeURIComponent(expiry)}`)
+      esRef.current = es
+
+      es.onopen = () => {
+        setLive(true)
+      }
+
+      es.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data)
+          if (msg.type === 'update' && msg.data) setData(msg.data)
+        } catch { /* */ }
+      }
+
+      es.onerror = () => {
+        setLive(false)
+        // Auto-reconnect after 500ms (not instant to avoid hammering)
+        if (!cancelled) {
+          reconnectTimeout = setTimeout(connect, 500)
+        }
+      }
     }
-    es.onerror = () => { setLive(false); es.close() }
 
-    return () => { es.close(); esRef.current = null; setLive(false) }
+    connect()
+
+    return () => {
+      cancelled = true
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
+      es?.close()
+      esRef.current = null
+      setLive(false)
+    }
   }, [index, expiry])
 
   // Auto-scroll to ATM once
@@ -305,6 +331,10 @@ export function OptionChainPage() {
     if (trade.orderType === 'LIMIT' && trade.limitPrice) {
       body.price = parseFloat(trade.limitPrice)
     }
+
+    // Pass SL/Target to backend
+    if (trade.stopLoss) body.stopLoss = parseFloat(trade.stopLoss)
+    if (trade.target) body.target = parseFloat(trade.target)
 
     try {
       const res = await fetch('/api/trade/place', {

@@ -83,10 +83,11 @@ export function IndexTicker() {
   }, [])
 
   useEffect(() => {
-    // Poll for real-time index data
-    // When WebSocket is connected, poll less frequently as backup
-    const intervalMs = wsStatus === 'connected' ? 2000 : 300
-    const interval = setInterval(() => void fetchIndices(), intervalMs)
+    // When SSE is connected, no REST polling needed — SSE is faster
+    if (wsStatus === 'connected') return
+
+    // When SSE disconnected, poll at 500ms as backup
+    const interval = setInterval(() => void fetchIndices(), 500)
     return () => clearInterval(interval)
   }, [wsStatus, fetchIndices])
 

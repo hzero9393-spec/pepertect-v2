@@ -132,8 +132,8 @@ class MarketDataManager {
   // Rate limiting
   private consecutiveYahooErrors = 0
   private consecutiveUpstoxErrors = 0
-  private baseInterval = 2000 // 2 second polling
-  private maxInterval = 10000 // max 10 seconds on errors
+  private baseInterval = 500 // 500ms polling for near real-time data
+  private maxInterval = 5000 // max 5 seconds on errors
 
   // Yahoo Finance batch tracking
   private yahooIndexBatch: string[] = []
@@ -159,13 +159,13 @@ class MarketDataManager {
       ([symbol, yahooSymbol]) => `${symbol}::${yahooSymbol}`
     )
 
-    // Split stocks into batches of 10 for Yahoo Finance
+    // Split stocks into batches of 20 for Yahoo Finance (larger batches = fewer round trips)
     const stockEntries = Object.entries(YAHOO_STOCK_SYMBOLS).map(
       ([symbol, yahooSymbol]) => `${symbol}::${yahooSymbol}`
     )
     this.yahooStockBatches = []
-    for (let i = 0; i < stockEntries.length; i += 10) {
-      this.yahooStockBatches.push(stockEntries.slice(i, i + 10))
+    for (let i = 0; i < stockEntries.length; i += 20) {
+      this.yahooStockBatches.push(stockEntries.slice(i, i + 20))
     }
 
     // Start polling
@@ -203,7 +203,8 @@ class MarketDataManager {
     const poll = async () => {
       const now = Date.now()
       const interval = this.getPollInterval()
-      if (now - this.lastPollTime < interval - 500) return
+      // Skip if previous poll is still recent (allow 80% of interval as skew)
+      if (now - this.lastPollTime < interval * 0.8) return
       this.lastPollTime = now
 
       try {
@@ -253,7 +254,7 @@ class MarketDataManager {
       }
     }
 
-    // Poll every 2 seconds
+    // Poll at 500ms base interval
     this.pollTimer = setInterval(poll, this.baseInterval)
     // Immediate first poll
     poll()
@@ -264,15 +265,14 @@ class MarketDataManager {
   private async fetchFromYahoo() {
     const allResults: Record<string, any> = {}
 
-    // Fetch indices first (5 items, single request)
-    await this.fetchYahooBatch(this.yahooIndexBatch, allResults, true)
-
-    // Fetch stocks in batches of 10
-    for (const batch of this.yahooStockBatches) {
-      await this.fetchYahooBatch(batch, allResults, false)
-      // Small delay between batches to be respectful
-      await new Promise(r => setTimeout(r, 100))
-    }
+    // Fetch indices and all stock batches in parallel for maximum speed
+    const batchPromises = [
+      this.fetchYahooBatch(this.yahooIndexBatch, allResults, true),
+      ...this.yahooStockBatches.map(batch =>
+        this.fetchYahooBatch(batch, allResults, false)
+      ),
+    ]
+    await Promise.allSettled(batchPromises)
 
     // Separate into indices and stocks
     const newIndices: Record<string, any> = {}
@@ -312,7 +312,7 @@ class MarketDataManager {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'application/json',
         },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(3000),
       })
 
       if (!res.ok) {
@@ -362,7 +362,7 @@ class MarketDataManager {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json',
           },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(2000),
         })
 
         if (!res.ok) return

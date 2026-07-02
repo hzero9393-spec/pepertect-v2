@@ -3,6 +3,25 @@ import { db } from '@/lib/db'
 import { authenticateRequest, calculateBrokerage, checkMarketStatus, validateOrderQuantity } from '@/lib/trade-auth'
 import { cache, CacheKeys, CacheTTL } from '@/lib/cache'
 import { Prisma } from '@prisma/client'
+import { getAutoExitWorker } from '@/lib/auto-exit-worker'
+
+// Helper: build SL/Target data for position creation
+function slTargetData(direction: string, entryPrice: number, sl?: number | null, tgt?: number | null) {
+  const data: Record<string, unknown> = {}
+  if (sl && sl > 0) {
+    // Validate: BUY SL must be below entry, SELL SL must be above
+    if (direction === 'BUY' && sl < entryPrice) data.stopLoss = sl
+    else if (direction === 'SELL' && sl > entryPrice) data.stopLoss = sl
+  }
+  if (tgt && tgt > 0) {
+    if (direction === 'BUY' && tgt > entryPrice) data.target = tgt
+    else if (direction === 'SELL' && tgt < entryPrice) data.target = tgt
+  }
+  if (data.stopLoss || data.target) {
+    data.lastCheckedPrice = entryPrice
+  }
+  return data
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +31,7 @@ export async function POST(request: NextRequest) {
 
     const userId = auth.userId
     const body = await request.json()
-    const { symbol, direction, orderType, segment, productType, quantity, price } = body
+    const { symbol, direction, orderType, segment, productType, quantity, price, stopLoss, target } = body
 
     // ─── Step 2: Input Validation ──────────────────────────────────
     if (!symbol || !direction || !orderType || !segment || !productType || !quantity) {
@@ -181,6 +200,7 @@ export async function POST(request: NextRequest) {
                 totalInvested: totalValue, currentValue,
                 unrealizedPnl: Math.round((currentValue - totalValue) * 100) / 100,
                 isOpen: true,
+                ...slTargetData('BUY', fillPrice, stopLoss, target),
               }
             })
             positionId = pos.id
@@ -460,6 +480,7 @@ export async function POST(request: NextRequest) {
                 instrumentId: (future as Record<string, unknown>).id as string,
                 expiryDate: (future as Record<string, unknown>).expiryDate as Date,
                 isOpen: true,
+                ...slTargetData('BUY', fillPrice, stopLoss, target),
               }
             })
             positionId = pos.id
@@ -588,6 +609,7 @@ export async function POST(request: NextRequest) {
                 instrumentId: (future as Record<string, unknown>).id as string,
                 expiryDate: (future as Record<string, unknown>).expiryDate as Date,
                 isOpen: true,
+                ...slTargetData('SELL', fillPrice, stopLoss, target),
               }
             })
             positionId = pos.id
@@ -790,6 +812,7 @@ export async function POST(request: NextRequest) {
                 instrumentId: option!.id,
                 expiryDate: option!.expiryDate,
                 isOpen: true,
+                ...slTargetData('BUY', fillPrice, stopLoss, target),
               }
             })
             positionId = pos.id
@@ -1047,6 +1070,7 @@ export async function POST(request: NextRequest) {
                 instrumentId: option!.id,
                 expiryDate: option!.expiryDate,
                 isOpen: true,
+                ...slTargetData('SELL', fillPrice, stopLoss, target),
               }
             })
             positionId = pos.id

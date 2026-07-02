@@ -7,7 +7,7 @@ import { getMarketDataManager, type MarketUpdate } from '@/lib/market-data-manag
 import { cache, CacheKeys } from '@/lib/cache'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60 // Allow long-lived connections
+export const maxDuration = 120 // Allow long-lived connections
 
 export async function GET(request: Request) {
   const encoder = new TextEncoder()
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
   // Also send periodic keep-alive pings
   const pingInterval = setInterval(async () => {
     await sendEvent('ping', { timestamp: Date.now() })
-  }, 15000)
+  }, 25000)
 
   // Handle client disconnect
   const cleanup = () => {
@@ -54,8 +54,8 @@ export async function GET(request: Request) {
   // Abort on client disconnect
   request.signal.addEventListener('abort', cleanup)
 
-  // Auto-close after 55 seconds (browser SSE typically reconnects)
-  setTimeout(cleanup, 55000)
+  // Auto-close after 110 seconds (browser SSE typically reconnects)
+  setTimeout(cleanup, 110000)
 
   return new Response(stream.readable, {
     headers: {

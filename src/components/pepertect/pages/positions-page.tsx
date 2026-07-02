@@ -892,71 +892,99 @@ export function PositionsPage() {
 
   useEffect(() => {
     fetchPositions()
-    const interval = setInterval(fetchPositions, 10000)
-    return () => clearInterval(interval)
+    // Initial fetch + refresh on trade signal
+    return () => {}
   }, [fetchPositions])
 
-  // ─── SL/Target Monitor Polling ────────────────────────────
-  // Polls every 2 seconds when user has positions with SL/Target set
-  // This is the CRITICAL piece that makes SL/Target auto-exit work
+  // ─── SSE Position Stream (REAL-TIME PRICES + P&L) ──────────
+  // Server pushes live prices every 500ms + instant exit events
   useEffect(() => {
     if (!token) return
 
-    const hasSLPositions = positions.some(
-      p => p.isOpen !== false && ((p.stopLoss && p.stopLoss > 0) || (p.target && p.target > 0))
-    )
+    const eventSource = new EventSource('/api/positions/stream')
 
-    if (!hasSLPositions) return
-
-    let cancelled = false
-
-    const runMonitor = async () => {
-      if (cancelled || !token) return
+    eventSource.addEventListener('message', (event: MessageEvent) => {
       try {
-        const res = await fetch('/api/trade/sl-monitor', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        if (!res.ok || cancelled) return
+        const msg = JSON.parse(event.data)
 
-        const data = await res.json()
+        if (msg.type === 'positions' && msg.data) {
+          // Update live prices from server
+          const updates: Record<string, number> = {}
+          const pnlUpdates: Record<string, number> = {}
+          const pnlPercentUpdates: Record<string, number> = {}
+          const exitEvents: Record<string, { reason: string; exitPrice: number; pnl: number; timestamp: number }> = {}
 
-        if (data.triggered && data.triggered.length > 0) {
-          // Show toast for each triggered position
-          for (const trigger of data.triggered) {
-            if (trigger.exitSuccess) {
-              const reasonLabel = trigger.reason === 'STOP_LOSS' ? 'Stop Loss' : 'Target'
-              const pnlStr = trigger.pnl !== undefined
-                ? ` | P&L: ${trigger.pnl >= 0 ? '+' : ''}₹${Math.abs(trigger.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                : ''
-              toast.success(`${reasonLabel} hit! ${trigger.symbol || ''} exited @ ₹${trigger.triggerPrice}${pnlStr}`, {
-                description: `Auto-exited via ${reasonLabel}`,
-                duration: 5000,
-              })
-            } else {
-              toast.error(`SL/Target exit failed for ${trigger.symbol || 'position'}`, {
-                description: trigger.exitError || 'Unknown error',
-                duration: 5000,
-              })
+          for (const update of msg.data) {
+            // Store live price
+            updates[update.positionId] = update.currentPrice
+            pnlUpdates[update.positionId] = update.unrealizedPnl
+            pnlPercentUpdates[update.positionId] = update.unrealizedPnlPercent
+
+            // Check for exit event
+            if (update.exitEvent) {
+              exitEvents[update.positionId] = update.exitEvent
             }
           }
-          // Refetch positions immediately after trigger
-          fetchPositions()
+
+          if (Object.keys(updates).length > 0) {
+            setLivePrices(prev => ({ ...prev, ...updates }))
+            setPrevPnlMap(prev => ({ ...prev, ...pnlUpdates }))
+            // Update positions with new prices
+            setPositions(prev => prev.map(pos => {
+              if (updates[pos.id] !== undefined) {
+                return {
+                  ...pos,
+                  currentPrice: updates[pos.id],
+                  unrealizedPnl: pnlUpdates[pos.id] ?? pos.unrealizedPnl,
+                  unrealizedPnlPercent: pnlPercentUpdates[pos.id] ?? pos.unrealizedPnlPercent,
+                }
+              }
+              return pos
+            }))
+          }
+
+          // Handle exit events — show toast and refetch
+          for (const [posId, evt] of Object.entries(exitEvents)) {
+            const reasonLabel = evt.reason === 'STOP_LOSS' ? 'Stop Loss' : 'Target'
+            toast.success(`${reasonLabel} hit! Auto-exited @ ₹${evt.exitPrice}`, {
+              description: `P&L: ${evt.pnl >= 0 ? '+' : ''}₹${Math.abs(evt.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
+              duration: 5000,
+            })
+            // Refetch after a short delay to get updated position list
+            setTimeout(() => fetchPositions(), 500)
+          }
         }
-      } catch {
-        // Silent — don't spam errors on network hiccups
+
+        if (msg.type === 'exit' && msg.data) {
+          const evt = msg.data
+          const reasonLabel = evt.reason === 'STOP_LOSS' ? 'Stop Loss' : 'Target'
+          toast.success(`${reasonLabel} hit! ${evt.symbol} @ ₹${evt.exitPrice}`, {
+            description: `P&L: ${evt.pnl >= 0 ? '+' : ''}₹${Math.abs(evt.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
+            duration: 5000,
+          })
+          setTimeout(() => fetchPositions(), 500)
+        }
+      } catch { /* ignore parse errors */ }
+    })
+
+    eventSource.onerror = () => {
+      // EventSource auto-reconnects, but if it fails permanently,
+      // fall back to 5s polling
+      console.log('[Positions] SSE error — falling back to polling')
+      const fallbackInterval = setInterval(fetchPositions, 5000)
+      const reconnectTimer = setTimeout(() => {
+        clearInterval(fallbackInterval)
+      }, 30000)
+      eventSource.close = () => {
+        clearInterval(fallbackInterval)
+        clearTimeout(reconnectTimer)
       }
     }
 
-    // Run immediately, then every 2 seconds
-    runMonitor()
-    const interval = setInterval(runMonitor, 2000)
-
     return () => {
-      cancelled = true
-      clearInterval(interval)
+      eventSource.close()
     }
-  }, [token, positions, fetchPositions])
+  }, [token, fetchPositions])
 
   // ─── Square Off ───────────────────────────────────────────
   const handleSquareOff = useCallback(async (positionId: string, symbol: string) => {

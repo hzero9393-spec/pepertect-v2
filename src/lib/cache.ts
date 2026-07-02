@@ -96,5 +96,5 @@ export const CacheTTL = {
   FUTURE_PRICE: 300,          // 300ms (ultra-fast real-time)
   OPTION_PRICE: 300,          // 300ms (ultra-fast real-time)
   USER_BALANCE: 10 * 1000,   // 10 seconds (after trade, balance changes)
-  MARKET_LIVE: 1000,          // 1 second (balance between speed & Upstox rate limits)
+  MARKET_LIVE: 300,          // 300ms (matches 500ms poll interval for sub-ms freshness)
 }

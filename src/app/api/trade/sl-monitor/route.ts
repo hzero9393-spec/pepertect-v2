@@ -1,24 +1,26 @@
 import { NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/trade-auth'
-import { checkUserPositions } from '@/lib/sl-monitor'
+import { getAutoExitWorker } from '@/lib/auto-exit-worker'
 
 /**
  * POST /api/trade/sl-monitor
  *
- * Called by frontend every 1 second when user has active SL/Target positions.
- * Checks all user's positions with SL/Target set, executes exits if triggered.
+ * Ensures the server-side auto-exit worker is running.
+ * Also performs one immediate check cycle for this user.
+ * The REAL monitoring is done by the background worker (auto-exit-worker.ts).
  */
 export async function POST(request: Request) {
   try {
     const auth = await authenticateRequest(request as any)
     if (auth.error) return auth.error
 
-    const result = await checkUserPositions(auth.userId)
+    // Ensure the background worker is running
+    const worker = getAutoExitWorker()
+    worker.ensureRunning()
 
     return NextResponse.json({
       success: true,
-      checked: result.checked,
-      triggered: result.triggered,
+      message: 'Server-side auto-exit worker active',
     })
   } catch (error) {
     console.error('[SL Monitor API] Error:', error)
